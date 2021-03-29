@@ -14,12 +14,13 @@ use uuid::Uuid;
 
 use crate::utils::{Opaque, OwnedTask};
 
+/// Type used to build a task runner.
 #[derive(Debug, Clone)]
 pub struct TaskRunnerOptions {
     min_concurrency: usize,
     max_concurrency: usize,
     channel_names: Option<Vec<String>>,
-    runner: Opaque<Arc<dyn Fn(CurrentTask) + Send + Sync + 'static>>,
+    dispatch: Opaque<Arc<dyn Fn(CurrentTask) + Send + Sync + 'static>>,
     pool: Pool<Postgres>,
     keep_alive: bool,
 }
@@ -31,6 +32,7 @@ struct TaskRunner {
     notify: Notify,
 }
 
+/// Type used to checkpoint a running task.
 #[derive(Debug, Clone)]
 pub struct Checkpoint<'a> {
     duration: Duration,
@@ -40,7 +42,9 @@ pub struct Checkpoint<'a> {
 }
 
 impl<'a> Checkpoint<'a> {
-    pub fn new(duration: Duration) -> Self {
+    /// Construct a new checkpoint which also keeps the task alive
+    /// for the specified interval.
+    pub fn new_keep_alive(duration: Duration) -> Self {
         Self {
             duration,
             extra_retries: 0,
@@ -48,18 +52,26 @@ impl<'a> Checkpoint<'a> {
             payload_bytes: None,
         }
     }
+    /// Construct a new checkpoint.
+    pub fn new() -> Self {
+        Self::new_keep_alive(Duration::from_secs(0))
+    }
+    /// Add extra retries to the current task.
     pub fn set_extra_retries(&mut self, extra_retries: usize) -> &mut Self {
         self.extra_retries = extra_retries;
         self
     }
+    /// Specify a new raw JSON payload.
     pub fn set_raw_json(&mut self, raw_json: &'a str) -> &mut Self {
         self.payload_json = Some(Cow::Borrowed(raw_json));
         self
     }
+    /// Specify a new raw binary payload.
     pub fn set_raw_bytes(&mut self, raw_bytes: &'a [u8]) -> &mut Self {
         self.payload_bytes = Some(raw_bytes);
         self
     }
+    /// Specify a new JSON payload.
     pub fn set_json<T: Serialize>(&mut self, value: &T) -> Result<&mut Self, serde_json::Error> {
         let value = serde_json::to_string(value)?;
         self.payload_json = Some(Cow::Owned(value));
@@ -82,6 +94,10 @@ impl<'a> Checkpoint<'a> {
     }
 }
 
+/// Handle to the currently executing task.
+/// When dropped, the task is assumed to no longer be running.
+/// To prevent the task being retried, it must be explicitly completed using
+/// one of the `.complete_` methods.
 #[derive(Debug)]
 pub struct CurrentTask {
     id: Uuid,
@@ -93,6 +109,7 @@ pub struct CurrentTask {
 }
 
 impl CurrentTask {
+    /// Returns the database pool used to receive this task.
     pub fn pool(&self) -> &Pool<Postgres> {
         &self.task_runner.options.pool
     }
@@ -106,6 +123,8 @@ impl CurrentTask {
             .await?;
         Ok(())
     }
+    /// Complete this task and commit the provided transaction at the same time.
+    /// If the transaction cannot be committed, the task will not be completed.
     pub async fn complete_with_transaction(
         &mut self,
         mut tx: sqlx::Transaction<'_, Postgres>,
@@ -115,11 +134,15 @@ impl CurrentTask {
         self.keep_alive = None;
         Ok(())
     }
+    /// Complete this task.
     pub async fn complete(&mut self) -> Result<(), sqlx::Error> {
         self.delete(self.pool()).await?;
         self.keep_alive = None;
         Ok(())
     }
+    /// Checkpoint this task and commit the provided transaction at the same time.
+    /// If the transaction cannot be committed, the task will not be checkpointed.
+    /// Checkpointing allows the task payload to be replaced for the next retry.
     pub async fn checkpoint_with_transaction(
         &mut self,
         mut tx: sqlx::Transaction<'_, Postgres>,
@@ -129,10 +152,12 @@ impl CurrentTask {
         tx.commit().await?;
         Ok(())
     }
+    /// Checkpointing allows the task payload to be replaced for the next retry.
     pub async fn checkpoint(&mut self, checkpoint: &Checkpoint<'_>) -> Result<(), sqlx::Error> {
         checkpoint.execute(self.id, self.pool()).await?;
         Ok(())
     }
+    /// Prevent this task from being retried for the specified interval.
     pub async fn keep_alive(&mut self, duration: Duration) -> Result<(), sqlx::Error> {
         sqlx::query("SELECT mq_keep_alive(ARRAY[$1], $2)")
             .bind(self.id)
@@ -141,12 +166,15 @@ impl CurrentTask {
             .await?;
         Ok(())
     }
+    /// Returns the ID of this task.
     pub fn id(&self) -> Uuid {
         self.id
     }
+    /// Returns the name of this task.
     pub fn name(&self) -> &str {
         &self.name
     }
+    /// Extracts the JSON payload belonging to this task (if present).
     pub fn json<'a, T: Deserialize<'a>>(&'a self) -> Result<Option<T>, serde_json::Error> {
         if let Some(payload_json) = &self.payload_json {
             serde_json::from_str(payload_json).map(Some)
@@ -154,9 +182,11 @@ impl CurrentTask {
             Ok(None)
         }
     }
+    /// Returns the raw JSON payload for this task.
     pub fn raw_json(&self) -> Option<&str> {
         self.payload_json.as_deref()
     }
+    /// Returns the raw binary payload for this task.
     pub fn raw_bytes(&self) -> Option<&[u8]> {
         self.payload_bytes.as_deref()
     }
@@ -176,16 +206,49 @@ impl Drop for CurrentTask {
 }
 
 impl TaskRunnerOptions {
+    /// Begin constructing a new task runner using the specified connection pool,
+    /// and the provided execution function.
     pub fn new<F: Fn(CurrentTask) + Send + Sync + 'static>(pool: &Pool<Postgres>, f: F) -> Self {
         Self {
             min_concurrency: 16,
             max_concurrency: 32,
             channel_names: None,
             keep_alive: true,
-            runner: Opaque(Arc::new(f)),
+            dispatch: Opaque(Arc::new(f)),
             pool: pool.clone(),
         }
     }
+    /// Set the concurrency limits for this task runner. When the number of active
+    /// tasks falls below the minimum, the runner will poll for more, up to the maximum.
+    ///
+    /// The difference between the min and max will dictate the maximum batch size which
+    /// can be received: larger batch sizes are more efficient.
+    pub fn set_concurrency(&mut self, min_concurrency: usize, max_concurrency: usize) -> &mut Self {
+        self.min_concurrency = min_concurrency;
+        self.max_concurrency = max_concurrency;
+        self
+    }
+    /// Set the channel names which this task runner will subscribe to. If unspecified,
+    /// the task runner will subscribe to all channels.
+    pub fn set_channel_names<'a>(&'a mut self, channel_names: &[&str]) -> &'a mut Self {
+        self.channel_names = Some(
+            channel_names
+                .iter()
+                .copied()
+                .map(ToOwned::to_owned)
+                .collect(),
+        );
+        self
+    }
+    /// Choose whether to automatically keep tasks alive whilst they're still
+    /// running. Defaults to `true`.
+    pub fn set_keep_alive(&mut self, keep_alive: bool) -> &mut Self {
+        self.keep_alive = keep_alive;
+        self
+    }
+
+    /// Start the task runner in the background. The task runner will stop when the
+    /// returned handle is dropped.
     pub async fn run(&self) -> Result<OwnedTask, sqlx::Error> {
         let options = self.clone();
         let task_runner = Arc::new(TaskRunner {
@@ -304,7 +367,7 @@ async fn poll_and_dispatch(
                 keep_alive,
             };
             task_runner.running_tasks.fetch_add(1, Ordering::SeqCst);
-            (options.runner)(current_task);
+            (options.dispatch)(current_task);
         }
     }
 
