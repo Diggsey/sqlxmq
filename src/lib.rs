@@ -110,13 +110,15 @@
 //! The first step is to define a function to be run on the job queue.
 //!
 //! ```rust
+//! use std::error::Error;
+//!
 //! use sqlxmq::{job, CurrentJob};
 //!
 //! // Arguments to the `#[job]` attribute allow setting default job options.
 //! #[job(channel_name = "foo")]
 //! async fn example_job(
 //!     mut current_job: CurrentJob,
-//! ) -> sqlx::Result<()> {
+//! ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 //!     // Decode a JSON payload
 //!     let who: Option<String> = current_job.json()?;
 //!
@@ -135,8 +137,21 @@
 //! Next we need to create a job runner: this is what listens for new jobs
 //! and executes them.
 //!
-//! ```rust
+//! ```rust,no_run
+//! use std::error::Error;
+//!
 //! use sqlxmq::JobRegistry;
+//!
+//! # use sqlxmq::{job, CurrentJob};
+//! #
+//! # #[job]
+//! # async fn example_job(
+//! #     current_job: CurrentJob,
+//! # ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> { Ok(()) }
+//! #
+//! # async fn connect_to_db() -> sqlx::Result<sqlx::Pool<sqlx::Postgres>> {
+//! #     unimplemented!()
+//! # }
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn Error>> {
@@ -160,6 +175,7 @@
 //!
 //!     // The job runner will continue listening and running
 //!     // jobs until `runner` is dropped.
+//!     Ok(())
 //! }
 //! ```
 //!
@@ -168,12 +184,25 @@
 //! The final step is to actually run a job.
 //!
 //! ```rust
+//! # use std::error::Error;
+//! # use sqlxmq::{job, CurrentJob};
+//! #
+//! # #[job]
+//! # async fn example_job(
+//! #     current_job: CurrentJob,
+//! # ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> { Ok(()) }
+//! #
+//! # async fn example(
+//! #     pool: sqlx::Pool<sqlx::Postgres>
+//! # ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 //! example_job.new()
 //!     // This is where we override job configuration
 //!     .set_channel_name("bar")
-//!     .set_json("John")
+//!     .set_json("John")?
 //!     .spawn(&pool)
 //!     .await?;
+//! #     Ok(())
+//! # }
 //! ```
 
 #[doc(hidden)]
