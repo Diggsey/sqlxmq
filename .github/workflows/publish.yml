@@ -22,3 +22,10 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: publish
+          args: --manifest-path sqlxmq_macros/Cargo.toml
+      - name: Wait for crates.io to update
+        run: sleep 30
+      - uses: actions-rs/cargo@v1
+        with:
+          command: publish
+          args: --manifest-path Cargo.toml

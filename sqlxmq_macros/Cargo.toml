@@ -3,11 +3,15 @@ name = "sqlxmq_macros"
 version = "0.1.0"
 authors = ["Diggory Blake <diggsey@googlemail.com>"]
 edition = "2018"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Diggsey/sqlxmq"
+description = "Procedural macros for sqlxmq"
+readme = "../README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
 proc-macro = true
 
 [dependencies]
-syn = { version = "1.0.64", features = ["derive"] }
+syn = { version = "1.0.64", features = ["full"] }
 quote = "1.0.9"
