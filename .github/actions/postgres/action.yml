@@ -6,10 +6,6 @@ runs:
       shell: bash
       run: echo "DATABASE_URL=postgres://postgres:password@localhost/sqlxmq" >> $GITHUB_ENV
 
-    - name: Install sqlx-cli
-      shell: bash
-      run: cargo install sqlx-cli
-
     - name: Start PostgreSQL on Ubuntu
       shell: bash
       run: |
