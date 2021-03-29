@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
 -- The UDT for creating messages
 CREATE TYPE mq_new_t AS (
     -- Unique message ID

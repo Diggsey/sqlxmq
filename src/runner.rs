@@ -33,7 +33,7 @@ struct JobRunner {
 }
 
 /// Type used to checkpoint a running job.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Checkpoint<'a> {
     duration: Duration,
     extra_retries: usize,
@@ -54,7 +54,7 @@ impl<'a> Checkpoint<'a> {
     }
     /// Construct a new checkpoint.
     pub fn new() -> Self {
-        Self::new_keep_alive(Duration::from_secs(0))
+        Self::default()
     }
     /// Add extra retries to the current job.
     pub fn set_extra_retries(&mut self, extra_retries: usize) -> &mut Self {
@@ -272,8 +272,15 @@ async fn start_listener(job_runner: Arc<JobRunner>) -> Result<OwnedHandle, sqlx:
         listener.listen("mq").await?;
     }
     Ok(OwnedHandle(task::spawn(async move {
-        while let Ok(_) = listener.recv().await {
-            job_runner.notify.notify_one();
+        let mut num_errors = 0;
+        loop {
+            if num_errors > 0 || listener.recv().await.is_ok() {
+                job_runner.notify.notify_one();
+                num_errors = 0;
+            } else {
+                tokio::time::sleep(Duration::from_secs(1 << num_errors)).await;
+                num_errors += 1;
+            }
         }
     })))
 }
@@ -327,12 +334,14 @@ async fn poll_and_dispatch(
             .await?;
     }
 
+    const MAX_WAIT: Duration = Duration::from_secs(60);
+
     let wait_time = messages
         .iter()
         .filter_map(|msg| msg.wait_time.clone())
         .map(to_duration)
         .min()
-        .unwrap_or(Duration::from_secs(60));
+        .unwrap_or(MAX_WAIT);
 
     for msg in messages {
         if let PolledMessage {

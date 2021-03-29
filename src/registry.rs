@@ -109,14 +109,14 @@ impl NamedJob {
         }
     }
     /// Initialize a job builder with the name and defaults of this job.
-    pub fn new(&self) -> JobBuilder<'static> {
+    pub fn builder(&self) -> JobBuilder<'static> {
         let mut builder = JobBuilder::new(self.name);
         (self.build_fn.0 .0)(&mut builder);
         builder
     }
     /// Initialize a job builder with the name and defaults of this job,
     /// using the provided job ID.
-    pub fn new_with_id(&self, id: Uuid) -> JobBuilder<'static> {
+    pub fn builder_with_id(&self, id: Uuid) -> JobBuilder<'static> {
         let mut builder = JobBuilder::new_with_id(id, self.name);
         (self.build_fn.0 .0)(&mut builder);
         builder

@@ -1,0 +1,22 @@
+name: "Setup PostgreSQL database"
+runs:
+  using: "composite"
+  steps:
+    - name: Set environment variable
+      shell: bash
+      run: echo "DATABASE_URL=postgres://postgres:password@localhost/sqlxmq" >> $GITHUB_ENV
+
+    - name: Install sqlx-cli
+      shell: bash
+      run: cargo install sqlx-cli
+
+    - name: Start PostgreSQL on Ubuntu
+      shell: bash
+      run: |
+        sudo systemctl start postgresql.service
+        pg_isready
+        sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'password'"
+
+    - name: Setup database
+      shell: bash
+      run: cargo sqlx database setup

@@ -195,7 +195,7 @@
 //! # async fn example(
 //! #     pool: sqlx::Pool<sqlx::Postgres>
 //! # ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-//! example_job.new()
+//! example_job.builder()
 //!     // This is where we override job configuration
 //!     .set_channel_name("bar")
 //!     .set_json("John")?
@@ -482,8 +482,8 @@ mod tests {
         let pool = &*test_pool().await;
         let _runner = named_job_runner(pool).await;
 
-        example_job1.new().spawn(pool).await.unwrap();
-        example_job2.new().spawn(pool).await.unwrap();
+        example_job1.builder().spawn(pool).await.unwrap();
+        example_job2.builder().spawn(pool).await.unwrap();
         pause().await;
     }
 }
