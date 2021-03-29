@@ -6,9 +6,9 @@ use serde::Serialize;
 use sqlx::Postgres;
 use uuid::Uuid;
 
-/// Type for building a task to send.
+/// Type for building a job to send.
 #[derive(Debug, Clone)]
-pub struct TaskBuilder<'a> {
+pub struct JobBuilder<'a> {
     id: Uuid,
     delay: Duration,
     channel_name: &'a str,
@@ -22,12 +22,12 @@ pub struct TaskBuilder<'a> {
     payload_bytes: Option<&'a [u8]>,
 }
 
-impl<'a> TaskBuilder<'a> {
-    /// Prepare to send a task with the specified name.
+impl<'a> JobBuilder<'a> {
+    /// Prepare to send a job with the specified name.
     pub fn new(name: &'a str) -> Self {
         Self::new_with_id(Uuid::new_v4(), name)
     }
-    /// Prepare to send a task with the specified name and ID.
+    /// Prepare to send a job with the specified name and ID.
     pub fn new_with_id(id: Uuid, name: &'a str) -> Self {
         Self {
             id,
@@ -76,32 +76,32 @@ impl<'a> TaskBuilder<'a> {
         self.commit_interval = commit_interval;
         self
     }
-    /// Set whether this task is strictly ordered with respect to other ordered
-    /// task in the same channel (default false).
+    /// Set whether this job is strictly ordered with respect to other ordered
+    /// job in the same channel (default false).
     pub fn set_ordered(&mut self, ordered: bool) -> &mut Self {
         self.ordered = ordered;
         self
     }
 
-    /// Set a delay before this task is executed (default none).
+    /// Set a delay before this job is executed (default none).
     pub fn set_delay(&mut self, delay: Duration) -> &mut Self {
         self.delay = delay;
         self
     }
 
-    /// Set a raw JSON payload for the task.
+    /// Set a raw JSON payload for the job.
     pub fn set_raw_json(&mut self, raw_json: &'a str) -> &mut Self {
         self.payload_json = Some(Cow::Borrowed(raw_json));
         self
     }
 
-    /// Set a raw binary payload for the task.
+    /// Set a raw binary payload for the job.
     pub fn set_raw_bytes(&mut self, raw_bytes: &'a [u8]) -> &mut Self {
         self.payload_bytes = Some(raw_bytes);
         self
     }
 
-    /// Set a JSON payload for the task.
+    /// Set a JSON payload for the job.
     pub fn set_json<T: ?Sized + Serialize>(
         &mut self,
         value: &T,
@@ -111,7 +111,7 @@ impl<'a> TaskBuilder<'a> {
         Ok(self)
     }
 
-    /// Spawn the task using the given executor. This might be a connection
+    /// Spawn the job using the given executor. This might be a connection
     /// pool, a connection, or a transaction.
     pub async fn spawn<'b, E: sqlx::Executor<'b, Database = Postgres>>(
         &self,
@@ -137,14 +137,14 @@ impl<'a> TaskBuilder<'a> {
     }
 }
 
-/// Commit the specified tasks. The tasks should have been previously spawned
+/// Commit the specified jobs. The jobs should have been previously spawned
 /// with the two-phase commit option enabled.
 pub async fn commit<'b, E: sqlx::Executor<'b, Database = Postgres>>(
     executor: E,
-    task_ids: &[Uuid],
+    job_ids: &[Uuid],
 ) -> Result<(), sqlx::Error> {
     sqlx::query("SELECT mq_commit($1)")
-        .bind(task_ids)
+        .bind(job_ids)
         .execute(executor)
         .await?;
     Ok(())

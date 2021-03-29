@@ -13,7 +13,7 @@ use syn::{
 };
 
 #[derive(Default)]
-struct TaskOptions {
+struct JobOptions {
     proto: Option<Path>,
     name: Option<String>,
     channel_name: Option<String>,
@@ -28,7 +28,7 @@ enum OptionValue<'a> {
     Path(&'a Path),
 }
 
-fn interpret_task_arg(options: &mut TaskOptions, arg: NestedMeta) -> Result<()> {
+fn interpret_job_arg(options: &mut JobOptions, arg: NestedMeta) -> Result<()> {
     fn error(arg: NestedMeta) -> Result<()> {
         Err(Error::new_spanned(arg, "Unexpected attribute argument"))
     }
@@ -90,99 +90,99 @@ fn interpret_task_arg(options: &mut TaskOptions, arg: NestedMeta) -> Result<()> 
     Ok(())
 }
 
-/// Marks a function as being a background task.
+/// Marks a function as being a background job.
 ///
-/// The function must take a single `CurrentTask` argument, and should
+/// The function must take a single `CurrentJob` argument, and should
 /// be async or return a future.
 ///
 /// The async result must be a `Result<(), E>` type, where `E` is convertible
 /// to a `Box<dyn Error + Send + Sync + 'static>`, which is the case for most
 /// error types.
 ///
-/// Several options can be provided to the `#[task]` attribute:
+/// Several options can be provided to the `#[job]` attribute:
 ///
 /// # Name
 ///
 /// ```
-/// #[task("example")]
-/// #[task(name="example")]
+/// #[job("example")]
+/// #[job(name="example")]
 /// ```
 ///
-/// This overrides the name for this task. If unspecified, the fully-qualified
-/// name of the function is used. If you move a task to a new module or rename
-/// the function, you may which to override the task name to prevent it from
+/// This overrides the name for this job. If unspecified, the fully-qualified
+/// name of the function is used. If you move a job to a new module or rename
+/// the function, you may which to override the job name to prevent it from
 /// changing.
 ///
 /// # Channel name
 ///
 /// ```
-/// #[task(channel_name="foo")]
+/// #[job(channel_name="foo")]
 /// ```
 ///
-/// This sets the default channel name on which the task will be spawned.
+/// This sets the default channel name on which the job will be spawned.
 ///
 /// # Retries
 ///
 /// ```
-/// #[task(retries = 3)]
+/// #[job(retries = 3)]
 /// ```
 ///
-/// This sets the default number of retries for the task.
+/// This sets the default number of retries for the job.
 ///
 /// # Retry backoff
 ///
 /// ```
-/// #[task(backoff_secs=1.5)]
-/// #[task(backoff_secs=2)]
+/// #[job(backoff_secs=1.5)]
+/// #[job(backoff_secs=2)]
 /// ```
 ///
-/// This sets the default initial retry backoff for the task in seconds.
+/// This sets the default initial retry backoff for the job in seconds.
 ///
 /// # Ordered
 ///
 /// ```
-/// #[task(ordered)]
-/// #[task(ordered=true)]
-/// #[task(ordered=false)]
+/// #[job(ordered)]
+/// #[job(ordered=true)]
+/// #[job(ordered=false)]
 /// ```
 ///
-/// This sets whether the task will be strictly ordered by default.
+/// This sets whether the job will be strictly ordered by default.
 ///
 /// # Prototype
 ///
 /// ```
 /// fn my_proto<'a, 'b>(
-///     builder: &'a mut TaskBuilder<'b>
-/// ) -> &'a mut TaskBuilder<'b> {
+///     builder: &'a mut JobBuilder<'b>
+/// ) -> &'a mut JobBuilder<'b> {
 ///     builder.set_channel_name("bar")
 /// }
 ///
-/// #[task(proto(my_proto))]
+/// #[job(proto(my_proto))]
 /// ```
 ///
-/// This allows setting several task options at once using the specified function,
-/// and can be convient if you have several tasks which should have similar
+/// This allows setting several job options at once using the specified function,
+/// and can be convient if you have several jobs which should have similar
 /// defaults.
 ///
 /// # Combinations
 ///
-/// Multiple task options can be combined. The order is not important, but the
+/// Multiple job options can be combined. The order is not important, but the
 /// prototype will always be applied first so that explicit options can override it.
 /// Each option can only be provided once in the attribute.
 ///
 /// ```
-/// #[task("my_task", proto(my_proto), retries=0, ordered)]
+/// #[job("my_job", proto(my_proto), retries=0, ordered)]
 /// ```
 ///
 #[proc_macro_attribute]
-pub fn task(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn job(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(attr as AttributeArgs);
     let mut inner_fn = parse_macro_input!(item as ItemFn);
 
-    let mut options = TaskOptions::default();
+    let mut options = JobOptions::default();
     let mut errors = Vec::new();
     for arg in args {
-        if let Err(e) = interpret_task_arg(&mut options, arg) {
+        if let Err(e) = interpret_job_arg(&mut options, arg) {
             errors.push(e.into_compile_error());
         }
     }
@@ -226,15 +226,15 @@ pub fn task(attr: TokenStream, item: TokenStream) -> TokenStream {
     let expanded = quote! {
         #(#errors)*
         #[allow(non_upper_case_globals)]
-        #vis static #name: &'static sqlxmq::NamedTask = &{
+        #vis static #name: &'static sqlxmq::NamedJob = &{
             #inner_fn
-            sqlxmq::NamedTask::new_internal(
+            sqlxmq::NamedJob::new_internal(
                 #fq_name,
                 sqlxmq::hidden::BuildFn(|builder| {
                     builder #(#chain)*
                 }),
-                sqlxmq::hidden::RunFn(|registry, current_task| {
-                    registry.spawn_internal(#fq_name, inner(current_task));
+                sqlxmq::hidden::RunFn(|registry, current_job| {
+                    registry.spawn_internal(#fq_name, inner(current_job));
                 }),
             )
         };

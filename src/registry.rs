@@ -9,42 +9,42 @@ use uuid::Uuid;
 
 use crate::hidden::{BuildFn, RunFn};
 use crate::utils::Opaque;
-use crate::{TaskBuilder, TaskRunnerOptions};
+use crate::{JobBuilder, JobRunnerOptions};
 
-/// Stores a mapping from task name to task. Can be used to construct
-/// a task runner.
-pub struct TaskRegistry {
+/// Stores a mapping from job name to job. Can be used to construct
+/// a job runner.
+pub struct JobRegistry {
     error_handler: Arc<dyn Fn(&str, Box<dyn Error + Send + 'static>) + Send + Sync>,
-    task_map: HashMap<&'static str, &'static NamedTask>,
+    job_map: HashMap<&'static str, &'static NamedJob>,
 }
 
-/// Error returned when a task is received whose name is not in the registry.
+/// Error returned when a job is received whose name is not in the registry.
 #[derive(Debug)]
-pub struct UnknownTaskError;
+pub struct UnknownJobError;
 
-impl Error for UnknownTaskError {}
-impl Display for UnknownTaskError {
+impl Error for UnknownJobError {}
+impl Display for UnknownJobError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Unknown task")
+        f.write_str("Unknown job")
     }
 }
 
-impl TaskRegistry {
-    /// Construct a new task registry from the provided task list.
-    pub fn new(tasks: &[&'static NamedTask]) -> Self {
-        let mut task_map = HashMap::new();
-        for &task in tasks {
-            if task_map.insert(task.name(), task).is_some() {
-                panic!("Duplicate task registered: {}", task.name());
+impl JobRegistry {
+    /// Construct a new job registry from the provided job list.
+    pub fn new(jobs: &[&'static NamedJob]) -> Self {
+        let mut job_map = HashMap::new();
+        for &job in jobs {
+            if job_map.insert(job.name(), job).is_some() {
+                panic!("Duplicate job registered: {}", job.name());
             }
         }
         Self {
             error_handler: Arc::new(Self::default_error_handler),
-            task_map,
+            job_map,
         }
     }
 
-    /// Set a function to be called whenever a task returns an error.
+    /// Set a function to be called whenever a job returns an error.
     pub fn set_error_handler(
         &mut self,
         error_handler: impl Fn(&str, Box<dyn Error + Send + 'static>) + Send + Sync + 'static,
@@ -53,14 +53,14 @@ impl TaskRegistry {
         self
     }
 
-    /// Look-up a task by name.
-    pub fn resolve_task(&self, name: &str) -> Option<&'static NamedTask> {
-        self.task_map.get(name).copied()
+    /// Look-up a job by name.
+    pub fn resolve_job(&self, name: &str) -> Option<&'static NamedJob> {
+        self.job_map.get(name).copied()
     }
 
     /// The default error handler implementation, which simply logs the error.
     pub fn default_error_handler(name: &str, error: Box<dyn Error + Send + 'static>) {
-        log::error!("Task {} failed: {}", name, error);
+        log::error!("Job {} failed: {}", name, error);
     }
 
     #[doc(hidden)]
@@ -77,29 +77,29 @@ impl TaskRegistry {
         });
     }
 
-    /// Construct a task runner from this registry and the provided connection
+    /// Construct a job runner from this registry and the provided connection
     /// pool.
-    pub fn runner(self, pool: &Pool<Postgres>) -> TaskRunnerOptions {
-        TaskRunnerOptions::new(pool, move |current_task| {
-            if let Some(task) = self.resolve_task(current_task.name()) {
-                (task.run_fn.0 .0)(&self, current_task);
+    pub fn runner(self, pool: &Pool<Postgres>) -> JobRunnerOptions {
+        JobRunnerOptions::new(pool, move |current_job| {
+            if let Some(job) = self.resolve_job(current_job.name()) {
+                (job.run_fn.0 .0)(&self, current_job);
             } else {
-                (self.error_handler)(current_task.name(), Box::new(UnknownTaskError))
+                (self.error_handler)(current_job.name(), Box::new(UnknownJobError))
             }
         })
     }
 }
 
-/// Type for a named task. Functions annotated with `#[task]` are
-/// transformed into static variables whose type is `&'static NamedTask`.
+/// Type for a named job. Functions annotated with `#[job]` are
+/// transformed into static variables whose type is `&'static NamedJob`.
 #[derive(Debug)]
-pub struct NamedTask {
+pub struct NamedJob {
     name: &'static str,
     build_fn: Opaque<BuildFn>,
     run_fn: Opaque<RunFn>,
 }
 
-impl NamedTask {
+impl NamedJob {
     #[doc(hidden)]
     pub const fn new_internal(name: &'static str, build_fn: BuildFn, run_fn: RunFn) -> Self {
         Self {
@@ -108,21 +108,21 @@ impl NamedTask {
             run_fn: Opaque(run_fn),
         }
     }
-    /// Initialize a task builder with the name and defaults of this task.
-    pub fn new(&self) -> TaskBuilder<'static> {
-        let mut builder = TaskBuilder::new(self.name);
+    /// Initialize a job builder with the name and defaults of this job.
+    pub fn new(&self) -> JobBuilder<'static> {
+        let mut builder = JobBuilder::new(self.name);
         (self.build_fn.0 .0)(&mut builder);
         builder
     }
-    /// Initialize a task builder with the name and defaults of this task,
-    /// using the provided task ID.
-    pub fn new_with_id(&self, id: Uuid) -> TaskBuilder<'static> {
-        let mut builder = TaskBuilder::new_with_id(id, self.name);
+    /// Initialize a job builder with the name and defaults of this job,
+    /// using the provided job ID.
+    pub fn new_with_id(&self, id: Uuid) -> JobBuilder<'static> {
+        let mut builder = JobBuilder::new_with_id(id, self.name);
         (self.build_fn.0 .0)(&mut builder);
         builder
     }
 
-    /// Returns the name of this task.
+    /// Returns the name of this job.
     pub const fn name(&self) -> &'static str {
         self.name
     }

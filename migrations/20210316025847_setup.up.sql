@@ -96,7 +96,7 @@ RETURNS TABLE(name TEXT, args TEXT) AS $$
     LIMIT batch_size
 $$ LANGUAGE SQL STABLE;
 
--- Main entry-point for task runner: pulls a batch of messages from the queue.
+-- Main entry-point for job runner: pulls a batch of messages from the queue.
 CREATE FUNCTION mq_poll(channel_names TEXT[], batch_size INT DEFAULT 1)
 RETURNS TABLE(
     id UUID,

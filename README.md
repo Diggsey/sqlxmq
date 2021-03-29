@@ -1,96 +1,96 @@
 # sqlxmq
 
-A task queue built on `sqlx` and `PostgreSQL`.
+A job queue built on `sqlx` and `PostgreSQL`.
 
-This library allows a CRUD application to run background tasks without complicating its
+This library allows a CRUD application to run background jobs without complicating its
 deployment. The only runtime dependency is `PostgreSQL`, so this is ideal for applications
 already using a `PostgreSQL` database.
 
-Although using a SQL database as a task queue means compromising on latency of
-delivered tasks, there are several show-stopping issues present in ordinary task
+Although using a SQL database as a job queue means compromising on latency of
+delivered jobs, there are several show-stopping issues present in ordinary job
 queues which are avoided altogether.
 
-With any other task queue, in-flight tasks are state that is not covered by normal
-database backups. Even if tasks _are_ backed up, there is no way to restore both
-a database and a task queue to a consistent point-in-time without manually
+With most other job queues, in-flight jobs are state that is not covered by normal
+database backups. Even if jobs _are_ backed up, there is no way to restore both
+a database and a job queue to a consistent point-in-time without manually
 resolving conflicts.
 
-By storing tasks in the database, existing backup procedures will store a perfectly
-consistent state of both in-flight tasks and persistent data. Additionally, tasks can
+By storing jobs in the database, existing backup procedures will store a perfectly
+consistent state of both in-flight jobs and persistent data. Additionally, jobs can
 be spawned and completed as part of other transactions, making it easy to write correct
 application code.
 
-Leveraging the power of `PostgreSQL`, this task queue offers several features not
-present in other task queues.
+Leveraging the power of `PostgreSQL`, this job queue offers several features not
+present in other job queues.
 
 # Features
 
-- **Send/receive multiple tasks at once.**
+- **Send/receive multiple jobs at once.**
 
   This reduces the number of queries to the database.
 
-- **Send tasks to be executed at a future date and time.**
+- **Send jobs to be executed at a future date and time.**
 
   Avoids the need for a separate scheduling system.
 
-- **Reliable delivery of tasks.**
+- **Reliable delivery of jobs.**
 
 - **Automatic retries with exponential backoff.**
 
   Number of retries and initial backoff parameters are configurable.
 
-- **Transactional sending of tasks.**
+- **Transactional sending of jobs.**
 
-  Avoids sending spurious tasks if a transaction is rolled back.
+  Avoids sending spurious jobs if a transaction is rolled back.
 
-- **Transactional completion of tasks.**
+- **Transactional completion of jobs.**
 
-  If all side-effects of a task are updates to the database, this provides
-  true exactly-once execution of tasks.
+  If all side-effects of a job are updates to the database, this provides
+  true exactly-once execution of jobs.
 
-- **Transactional check-pointing of tasks.**
+- **Transactional check-pointing of jobs.**
 
-  Long-running tasks can check-point their state to avoid having to restart
+  Long-running jobs can check-point their state to avoid having to restart
   from the beginning if there is a failure: the next retry can continue
   from the last check-point.
 
-- **Opt-in strictly ordered task delivery.**
+- **Opt-in strictly ordered job delivery.**
 
-  Tasks within the same channel will be processed strictly in-order
-  if this option is enabled for the task.
+  Jobs within the same channel will be processed strictly in-order
+  if this option is enabled for the job.
 
-- **Fair task delivery.**
+- **Fair job delivery.**
 
-  A channel with a lot of tasks ready to run will not starve a channel with fewer
-  tasks.
+  A channel with a lot of jobs ready to run will not starve a channel with fewer
+  jobs.
 
 - **Opt-in two-phase commit.**
 
   This is particularly useful on an ordered channel where a position can be "reserved"
-  in the task order, but not committed until later.
+  in the job order, but not committed until later.
 
 - **JSON and/or binary payloads.**
 
-  Tasks can use whichever is most convenient.
+  Jobs can use whichever is most convenient.
 
-- **Automatic keep-alive of tasks.**
+- **Automatic keep-alive of jobs.**
 
-  Long-running tasks will automatically be "kept alive" to prevent them being
+  Long-running jobs will automatically be "kept alive" to prevent them being
   retried whilst they're still ongoing.
 
 - **Concurrency limits.**
 
-  Specify the minimum and maximum number of concurrent tasks each runner should
+  Specify the minimum and maximum number of concurrent jobs each runner should
   handle.
 
-- **Built-in task registry via an attribute macro.**
+- **Built-in job registry via an attribute macro.**
 
-  Tasks can be easily registered with a runner, and default configuration specified
-  on a per-task basis.
+  Jobs can be easily registered with a runner, and default configuration specified
+  on a per-job basis.
 
 - **Implicit channels.**
 
-  Channels are implicitly created and destroyed when tasks are sent and processed,
+  Channels are implicitly created and destroyed when jobs are sent and processed,
   so no setup is required.
 
 - **Channel groups.**
@@ -100,75 +100,75 @@ present in other task queues.
 
 - **NOTIFY-based polling.**
 
-  This saves resources when few tasks are being processed.
+  This saves resources when few jobs are being processed.
 
 # Getting started
 
-## Defining tasks
+## Defining jobs
 
-The first step is to define a function to be run on the task queue.
+The first step is to define a function to be run on the job queue.
 
 ```rust
-use sqlxmq::{task, CurrentTask};
+use sqlxmq::{job, CurrentJob};
 
-// Arguments to the `#[task]` attribute allow setting default task options.
-#[task(channel_name = "foo")]
-async fn example_task(
-    mut current_task: CurrentTask,
+// Arguments to the `#[job]` attribute allow setting default job options.
+#[job(channel_name = "foo")]
+async fn example_job(
+    mut current_job: CurrentJob,
 ) -> sqlx::Result<()> {
     // Decode a JSON payload
-    let who: Option<String> = current_task.json()?;
+    let who: Option<String> = current_job.json()?;
 
     // Do some work
     println!("Hello, {}!", who.as_deref().unwrap_or("world"));
 
-    // Mark the task as complete
-    current_task.complete().await?;
+    // Mark the job as complete
+    current_job.complete().await?;
 
     Ok(())
 }
 ```
 
-## Listening for tasks
+## Listening for jobs
 
-Next we need to create a task runner: this is what listens for new tasks
+Next we need to create a job runner: this is what listens for new jobs
 and executes them.
 
 ```rust
-use sqlxmq::TaskRegistry;
+use sqlxmq::JobRegistry;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // You'll need to provide a Postgres connection pool.
     let pool = connect_to_db().await?;
 
-    // Construct a task registry from our single task.
-    let mut registry = TaskRegistry::new(&[example_task]);
+    // Construct a job registry from our single job.
+    let mut registry = JobRegistry::new(&[example_job]);
     // Here is where you can configure the registry
     // registry.set_error_handler(...)
 
     let runner = registry
-        // Create a task runner using the connection pool.
+        // Create a job runner using the connection pool.
         .runner(&pool)
-        // Here is where you can configure the task runner
-        // Aim to keep 10-20 tasks running at a time.
+        // Here is where you can configure the job runner
+        // Aim to keep 10-20 jobs running at a time.
         .set_concurrency(10, 20)
-        // Start the task runner in the background.
+        // Start the job runner in the background.
         .run()
         .await?;
 
-    // The task runner will continue listening and running
-    // tasks until `runner` is dropped.
+    // The job runner will continue listening and running
+    // jobs until `runner` is dropped.
 }
 ```
 
-## Spawning a task
+## Spawning a job
 
-The final step is to actually run a task.
+The final step is to actually run a job.
 
 ```rust
-example_task.new()
-    // This is where we override task configuration
+example_job.new()
+    // This is where we override job configuration
     .set_channel_name("bar")
     .set_json("John")
     .spawn(&pool)

@@ -1,6 +1,6 @@
-use crate::{CurrentTask, TaskBuilder, TaskRegistry};
+use crate::{CurrentJob, JobBuilder, JobRegistry};
 
 #[doc(hidden)]
-pub struct BuildFn(pub for<'a> fn(&'a mut TaskBuilder<'static>) -> &'a mut TaskBuilder<'static>);
+pub struct BuildFn(pub for<'a> fn(&'a mut JobBuilder<'static>) -> &'a mut JobBuilder<'static>);
 #[doc(hidden)]
-pub struct RunFn(pub fn(&TaskRegistry, CurrentTask));
+pub struct RunFn(pub fn(&JobRegistry, CurrentJob));

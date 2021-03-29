@@ -12,27 +12,27 @@ use tokio::sync::Notify;
 use tokio::task;
 use uuid::Uuid;
 
-use crate::utils::{Opaque, OwnedTask};
+use crate::utils::{Opaque, OwnedHandle};
 
-/// Type used to build a task runner.
+/// Type used to build a job runner.
 #[derive(Debug, Clone)]
-pub struct TaskRunnerOptions {
+pub struct JobRunnerOptions {
     min_concurrency: usize,
     max_concurrency: usize,
     channel_names: Option<Vec<String>>,
-    dispatch: Opaque<Arc<dyn Fn(CurrentTask) + Send + Sync + 'static>>,
+    dispatch: Opaque<Arc<dyn Fn(CurrentJob) + Send + Sync + 'static>>,
     pool: Pool<Postgres>,
     keep_alive: bool,
 }
 
 #[derive(Debug)]
-struct TaskRunner {
-    options: TaskRunnerOptions,
-    running_tasks: AtomicUsize,
+struct JobRunner {
+    options: JobRunnerOptions,
+    running_jobs: AtomicUsize,
     notify: Notify,
 }
 
-/// Type used to checkpoint a running task.
+/// Type used to checkpoint a running job.
 #[derive(Debug, Clone)]
 pub struct Checkpoint<'a> {
     duration: Duration,
@@ -42,7 +42,7 @@ pub struct Checkpoint<'a> {
 }
 
 impl<'a> Checkpoint<'a> {
-    /// Construct a new checkpoint which also keeps the task alive
+    /// Construct a new checkpoint which also keeps the job alive
     /// for the specified interval.
     pub fn new_keep_alive(duration: Duration) -> Self {
         Self {
@@ -56,7 +56,7 @@ impl<'a> Checkpoint<'a> {
     pub fn new() -> Self {
         Self::new_keep_alive(Duration::from_secs(0))
     }
-    /// Add extra retries to the current task.
+    /// Add extra retries to the current job.
     pub fn set_extra_retries(&mut self, extra_retries: usize) -> &mut Self {
         self.extra_retries = extra_retries;
         self
@@ -79,11 +79,11 @@ impl<'a> Checkpoint<'a> {
     }
     async fn execute<'b, E: sqlx::Executor<'b, Database = Postgres>>(
         &self,
-        task_id: Uuid,
+        job_id: Uuid,
         executor: E,
     ) -> Result<(), sqlx::Error> {
         sqlx::query("SELECT mq_checkpoint($1, $2, $3, $4, $5)")
-            .bind(task_id)
+            .bind(job_id)
             .bind(self.duration)
             .bind(self.payload_json.as_deref())
             .bind(self.payload_bytes)
@@ -94,24 +94,24 @@ impl<'a> Checkpoint<'a> {
     }
 }
 
-/// Handle to the currently executing task.
-/// When dropped, the task is assumed to no longer be running.
-/// To prevent the task being retried, it must be explicitly completed using
+/// Handle to the currently executing job.
+/// When dropped, the job is assumed to no longer be running.
+/// To prevent the job being retried, it must be explicitly completed using
 /// one of the `.complete_` methods.
 #[derive(Debug)]
-pub struct CurrentTask {
+pub struct CurrentJob {
     id: Uuid,
     name: String,
     payload_json: Option<String>,
     payload_bytes: Option<Vec<u8>>,
-    task_runner: Arc<TaskRunner>,
-    keep_alive: Option<OwnedTask>,
+    job_runner: Arc<JobRunner>,
+    keep_alive: Option<OwnedHandle>,
 }
 
-impl CurrentTask {
-    /// Returns the database pool used to receive this task.
+impl CurrentJob {
+    /// Returns the database pool used to receive this job.
     pub fn pool(&self) -> &Pool<Postgres> {
-        &self.task_runner.options.pool
+        &self.job_runner.options.pool
     }
     async fn delete(
         &self,
@@ -123,8 +123,8 @@ impl CurrentTask {
             .await?;
         Ok(())
     }
-    /// Complete this task and commit the provided transaction at the same time.
-    /// If the transaction cannot be committed, the task will not be completed.
+    /// Complete this job and commit the provided transaction at the same time.
+    /// If the transaction cannot be committed, the job will not be completed.
     pub async fn complete_with_transaction(
         &mut self,
         mut tx: sqlx::Transaction<'_, Postgres>,
@@ -134,15 +134,15 @@ impl CurrentTask {
         self.keep_alive = None;
         Ok(())
     }
-    /// Complete this task.
+    /// Complete this job.
     pub async fn complete(&mut self) -> Result<(), sqlx::Error> {
         self.delete(self.pool()).await?;
         self.keep_alive = None;
         Ok(())
     }
-    /// Checkpoint this task and commit the provided transaction at the same time.
-    /// If the transaction cannot be committed, the task will not be checkpointed.
-    /// Checkpointing allows the task payload to be replaced for the next retry.
+    /// Checkpoint this job and commit the provided transaction at the same time.
+    /// If the transaction cannot be committed, the job will not be checkpointed.
+    /// Checkpointing allows the job payload to be replaced for the next retry.
     pub async fn checkpoint_with_transaction(
         &mut self,
         mut tx: sqlx::Transaction<'_, Postgres>,
@@ -152,12 +152,12 @@ impl CurrentTask {
         tx.commit().await?;
         Ok(())
     }
-    /// Checkpointing allows the task payload to be replaced for the next retry.
+    /// Checkpointing allows the job payload to be replaced for the next retry.
     pub async fn checkpoint(&mut self, checkpoint: &Checkpoint<'_>) -> Result<(), sqlx::Error> {
         checkpoint.execute(self.id, self.pool()).await?;
         Ok(())
     }
-    /// Prevent this task from being retried for the specified interval.
+    /// Prevent this job from being retried for the specified interval.
     pub async fn keep_alive(&mut self, duration: Duration) -> Result<(), sqlx::Error> {
         sqlx::query("SELECT mq_keep_alive(ARRAY[$1], $2)")
             .bind(self.id)
@@ -166,15 +166,15 @@ impl CurrentTask {
             .await?;
         Ok(())
     }
-    /// Returns the ID of this task.
+    /// Returns the ID of this job.
     pub fn id(&self) -> Uuid {
         self.id
     }
-    /// Returns the name of this task.
+    /// Returns the name of this job.
     pub fn name(&self) -> &str {
         &self.name
     }
-    /// Extracts the JSON payload belonging to this task (if present).
+    /// Extracts the JSON payload belonging to this job (if present).
     pub fn json<'a, T: Deserialize<'a>>(&'a self) -> Result<Option<T>, serde_json::Error> {
         if let Some(payload_json) = &self.payload_json {
             serde_json::from_str(payload_json).map(Some)
@@ -182,33 +182,30 @@ impl CurrentTask {
             Ok(None)
         }
     }
-    /// Returns the raw JSON payload for this task.
+    /// Returns the raw JSON payload for this job.
     pub fn raw_json(&self) -> Option<&str> {
         self.payload_json.as_deref()
     }
-    /// Returns the raw binary payload for this task.
+    /// Returns the raw binary payload for this job.
     pub fn raw_bytes(&self) -> Option<&[u8]> {
         self.payload_bytes.as_deref()
     }
 }
 
-impl Drop for CurrentTask {
+impl Drop for CurrentJob {
     fn drop(&mut self) {
-        if self
-            .task_runner
-            .running_tasks
-            .fetch_sub(1, Ordering::SeqCst)
-            == self.task_runner.options.min_concurrency
+        if self.job_runner.running_jobs.fetch_sub(1, Ordering::SeqCst)
+            == self.job_runner.options.min_concurrency
         {
-            self.task_runner.notify.notify_one();
+            self.job_runner.notify.notify_one();
         }
     }
 }
 
-impl TaskRunnerOptions {
-    /// Begin constructing a new task runner using the specified connection pool,
+impl JobRunnerOptions {
+    /// Begin constructing a new job runner using the specified connection pool,
     /// and the provided execution function.
-    pub fn new<F: Fn(CurrentTask) + Send + Sync + 'static>(pool: &Pool<Postgres>, f: F) -> Self {
+    pub fn new<F: Fn(CurrentJob) + Send + Sync + 'static>(pool: &Pool<Postgres>, f: F) -> Self {
         Self {
             min_concurrency: 16,
             max_concurrency: 32,
@@ -218,8 +215,8 @@ impl TaskRunnerOptions {
             pool: pool.clone(),
         }
     }
-    /// Set the concurrency limits for this task runner. When the number of active
-    /// tasks falls below the minimum, the runner will poll for more, up to the maximum.
+    /// Set the concurrency limits for this job runner. When the number of active
+    /// jobs falls below the minimum, the runner will poll for more, up to the maximum.
     ///
     /// The difference between the min and max will dictate the maximum batch size which
     /// can be received: larger batch sizes are more efficient.
@@ -228,8 +225,8 @@ impl TaskRunnerOptions {
         self.max_concurrency = max_concurrency;
         self
     }
-    /// Set the channel names which this task runner will subscribe to. If unspecified,
-    /// the task runner will subscribe to all channels.
+    /// Set the channel names which this job runner will subscribe to. If unspecified,
+    /// the job runner will subscribe to all channels.
     pub fn set_channel_names<'a>(&'a mut self, channel_names: &[&str]) -> &'a mut Self {
         self.channel_names = Some(
             channel_names
@@ -240,33 +237,33 @@ impl TaskRunnerOptions {
         );
         self
     }
-    /// Choose whether to automatically keep tasks alive whilst they're still
+    /// Choose whether to automatically keep jobs alive whilst they're still
     /// running. Defaults to `true`.
     pub fn set_keep_alive(&mut self, keep_alive: bool) -> &mut Self {
         self.keep_alive = keep_alive;
         self
     }
 
-    /// Start the task runner in the background. The task runner will stop when the
+    /// Start the job runner in the background. The job runner will stop when the
     /// returned handle is dropped.
-    pub async fn run(&self) -> Result<OwnedTask, sqlx::Error> {
+    pub async fn run(&self) -> Result<OwnedHandle, sqlx::Error> {
         let options = self.clone();
-        let task_runner = Arc::new(TaskRunner {
+        let job_runner = Arc::new(JobRunner {
             options,
-            running_tasks: AtomicUsize::new(0),
+            running_jobs: AtomicUsize::new(0),
             notify: Notify::new(),
         });
-        let listener_task = start_listener(task_runner.clone()).await?;
-        Ok(OwnedTask(task::spawn(main_loop(
-            task_runner,
+        let listener_task = start_listener(job_runner.clone()).await?;
+        Ok(OwnedHandle(task::spawn(main_loop(
+            job_runner,
             listener_task,
         ))))
     }
 }
 
-async fn start_listener(task_runner: Arc<TaskRunner>) -> Result<OwnedTask, sqlx::Error> {
-    let mut listener = PgListener::connect_with(&task_runner.options.pool).await?;
-    if let Some(channels) = &task_runner.options.channel_names {
+async fn start_listener(job_runner: Arc<JobRunner>) -> Result<OwnedHandle, sqlx::Error> {
+    let mut listener = PgListener::connect_with(&job_runner.options.pool).await?;
+    if let Some(channels) = &job_runner.options.channel_names {
         let names: Vec<String> = channels.iter().map(|c| format!("mq_{}", c)).collect();
         listener
             .listen_all(names.iter().map(|s| s.as_str()))
@@ -274,9 +271,9 @@ async fn start_listener(task_runner: Arc<TaskRunner>) -> Result<OwnedTask, sqlx:
     } else {
         listener.listen("mq").await?;
     }
-    Ok(OwnedTask(task::spawn(async move {
+    Ok(OwnedHandle(task::spawn(async move {
         while let Ok(_) = listener.recv().await {
-            task_runner.notify.notify_one();
+            job_runner.notify.notify_one();
         }
     })))
 }
@@ -304,12 +301,12 @@ fn to_duration(interval: PgInterval) -> Duration {
 }
 
 async fn poll_and_dispatch(
-    task_runner: &Arc<TaskRunner>,
+    job_runner: &Arc<JobRunner>,
     batch_size: i32,
 ) -> Result<Duration, sqlx::Error> {
     log::info!("Polling for messages");
 
-    let options = &task_runner.options;
+    let options = &job_runner.options;
     let messages = sqlx::query_as::<_, PolledMessage>("SELECT * FROM mq_poll($1, $2)")
         .bind(&options.channel_names)
         .bind(batch_size)
@@ -350,7 +347,7 @@ async fn poll_and_dispatch(
         {
             let retry_backoff = to_duration(retry_backoff);
             let keep_alive = if options.keep_alive {
-                Some(OwnedTask(task::spawn(keep_task_alive(
+                Some(OwnedHandle(task::spawn(keep_job_alive(
                     id,
                     options.pool.clone(),
                     retry_backoff,
@@ -358,31 +355,31 @@ async fn poll_and_dispatch(
             } else {
                 None
             };
-            let current_task = CurrentTask {
+            let current_job = CurrentJob {
                 id,
                 name,
                 payload_json,
                 payload_bytes,
-                task_runner: task_runner.clone(),
+                job_runner: job_runner.clone(),
                 keep_alive,
             };
-            task_runner.running_tasks.fetch_add(1, Ordering::SeqCst);
-            (options.dispatch)(current_task);
+            job_runner.running_jobs.fetch_add(1, Ordering::SeqCst);
+            (options.dispatch)(current_job);
         }
     }
 
     Ok(wait_time)
 }
 
-async fn main_loop(task_runner: Arc<TaskRunner>, _listener_task: OwnedTask) {
-    let options = &task_runner.options;
+async fn main_loop(job_runner: Arc<JobRunner>, _listener_task: OwnedHandle) {
+    let options = &job_runner.options;
     let mut failures = 0;
     loop {
-        let running_tasks = task_runner.running_tasks.load(Ordering::SeqCst);
-        let duration = if running_tasks < options.min_concurrency {
-            let batch_size = (options.max_concurrency - running_tasks) as i32;
+        let running_jobs = job_runner.running_jobs.load(Ordering::SeqCst);
+        let duration = if running_jobs < options.min_concurrency {
+            let batch_size = (options.max_concurrency - running_jobs) as i32;
 
-            match poll_and_dispatch(&task_runner, batch_size).await {
+            match poll_and_dispatch(&job_runner, batch_size).await {
                 Ok(duration) => {
                     failures = 0;
                     duration
@@ -398,11 +395,11 @@ async fn main_loop(task_runner: Arc<TaskRunner>, _listener_task: OwnedTask) {
         };
 
         // Wait for us to be notified, or for the timeout to elapse
-        let _ = tokio::time::timeout(duration, task_runner.notify.notified()).await;
+        let _ = tokio::time::timeout(duration, job_runner.notify.notified()).await;
     }
 }
 
-async fn keep_task_alive(id: Uuid, pool: Pool<Postgres>, mut interval: Duration) {
+async fn keep_job_alive(id: Uuid, pool: Pool<Postgres>, mut interval: Duration) {
     loop {
         tokio::time::sleep(interval / 2).await;
         interval *= 2;
@@ -412,7 +409,7 @@ async fn keep_task_alive(id: Uuid, pool: Pool<Postgres>, mut interval: Duration)
             .execute(&pool)
             .await
         {
-            log::error!("Failed to keep task {} alive: {}", id, e);
+            log::error!("Failed to keep job {} alive: {}", id, e);
             break;
         }
     }

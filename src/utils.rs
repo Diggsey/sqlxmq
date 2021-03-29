@@ -27,13 +27,13 @@ impl<T: Any> DerefMut for Opaque<T> {
     }
 }
 
-/// A handle to a background task which will be automatically cancelled if
+/// A handle to a background job which will be automatically cancelled if
 /// the handle is dropped. Extract the inner join handle to prevent this
 /// behaviour.
 #[derive(Debug)]
-pub struct OwnedTask(pub JoinHandle<()>);
+pub struct OwnedHandle(pub JoinHandle<()>);
 
-impl Drop for OwnedTask {
+impl Drop for OwnedHandle {
     fn drop(&mut self) {
         self.0.abort();
     }
