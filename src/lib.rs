@@ -321,7 +321,7 @@ mod tests {
     }
 
     async fn pause() {
-        pause_ms(100).await;
+        pause_ms(200).await;
     }
 
     async fn pause_ms(ms: u64) {
@@ -406,7 +406,7 @@ mod tests {
         let pool = &*test_pool().await;
         let (_runner, counter) = test_job_runner(&pool, move |_| async {}).await;
 
-        let backoff = 200;
+        let backoff = 500;
 
         assert_eq!(counter.load(Ordering::SeqCst), 0);
         JobBuilder::new("foo")
