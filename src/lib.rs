@@ -105,6 +105,15 @@
 //!
 //! # Getting started
 //!
+//! ## Database schema
+//!
+//! This crate expects certain database tables and stored procedures to exist.
+//! You can copy the migration files from this crate into your own migrations
+//! folder.
+//!
+//! All database items created by this crate are prefixed with `mq`, so as not
+//! to conflict with your own schema.
+//!
 //! ## Defining jobs
 //!
 //! The first step is to define a function to be run on the job queue.
@@ -196,7 +205,7 @@
 //! #     pool: sqlx::Pool<sqlx::Postgres>
 //! # ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 //! example_job.builder()
-//!     // This is where we override job configuration
+//!     // This is where we can override job configuration
 //!     .set_channel_name("bar")
 //!     .set_json("John")?
 //!     .spawn(&pool)

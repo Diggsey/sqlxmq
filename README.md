@@ -1,5 +1,9 @@
 # sqlxmq
 
+[![CI Status](https://github.com/Diggsey/sqlxmq/workflows/CI/badge.svg)](https://github.com/Diggsey/sqlxmq/actions?query=workflow%3ACI)
+[![Documentation](https://docs.rs/sqlxmq/badge.svg)](https://docs.rs/sqlxmq)
+[![crates.io](https://img.shields.io/crates/v/sqlxmq.svg)](https://crates.io/crates/sqlxmq)
+
 A job queue built on `sqlx` and `PostgreSQL`.
 
 This library allows a CRUD application to run background jobs without complicating its
@@ -104,6 +108,15 @@ present in other job queues.
 
 # Getting started
 
+## Database schema
+
+This crate expects certain database tables and stored procedures to exist.
+You can copy the migration files from this crate into your own migrations
+folder.
+
+All database items created by this crate are prefixed with `mq`, so as not
+to conflict with your own schema.
+
 ## Defining jobs
 
 The first step is to define a function to be run on the job queue.
@@ -167,8 +180,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 The final step is to actually run a job.
 
 ```rust
-example_job.new()
-    // This is where we override job configuration
+example_job.builder()
+    // This is where we can override job configuration
     .set_channel_name("bar")
     .set_json("John")
     .spawn(&pool)

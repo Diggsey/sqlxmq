@@ -1,12 +1,13 @@
 [package]
 name = "sqlxmq"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Diggory Blake <diggsey@googlemail.com>"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Diggsey/sqlxmq"
 description = "A reliable job queue using PostgreSQL as a backing store"
 readme = "README.md"
+documentation = "https://docs.rs/sqlxmq"
 
 [workspace]
 members = ["sqlxmq_macros"]
