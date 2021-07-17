@@ -31,10 +31,29 @@ impl<T: Any> DerefMut for Opaque<T> {
 /// the handle is dropped. Extract the inner join handle to prevent this
 /// behaviour.
 #[derive(Debug)]
-pub struct OwnedHandle(pub JoinHandle<()>);
+pub struct OwnedHandle(Option<JoinHandle<()>>);
+
+impl OwnedHandle {
+    /// Construct a new `OwnedHandle` from the provided `JoinHandle`
+    pub fn new(inner: JoinHandle<()>) -> Self {
+        Self(Some(inner))
+    }
+    /// Get back the original `JoinHandle`
+    pub fn into_inner(mut self) -> JoinHandle<()> {
+        self.0.take().expect("Only consumed once")
+    }
+    /// Stop the task and wait for it to finish.
+    pub async fn stop(self) {
+        let handle = self.into_inner();
+        handle.abort();
+        let _ = handle.await;
+    }
+}
 
 impl Drop for OwnedHandle {
     fn drop(&mut self) {
-        self.0.abort();
+        if let Some(handle) = self.0.take() {
+            handle.abort();
+        }
     }
 }

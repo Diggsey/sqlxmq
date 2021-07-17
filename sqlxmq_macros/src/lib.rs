@@ -92,8 +92,12 @@ fn interpret_job_arg(options: &mut JobOptions, arg: NestedMeta) -> Result<()> {
 
 /// Marks a function as being a background job.
 ///
-/// The function must take a single `CurrentJob` argument, and should
-/// be async or return a future.
+/// The first argument to the function must have type `CurrentJob`.
+/// Additional arguments can be used to access context from the job
+/// registry. Context is accessed based on the type of the argument.
+/// Context arguments must be `Send + Sync + Clone + 'static`.
+///
+/// The function should be async or return a future.
 ///
 /// The async result must be a `Result<(), E>` type, where `E` is convertible
 /// to a `Box<dyn Error + Send + Sync + 'static>`, which is the case for most
@@ -103,7 +107,7 @@ fn interpret_job_arg(options: &mut JobOptions, arg: NestedMeta) -> Result<()> {
 ///
 /// # Name
 ///
-/// ```
+/// ```ignore
 /// #[job("example")]
 /// #[job(name="example")]
 /// ```
@@ -115,7 +119,7 @@ fn interpret_job_arg(options: &mut JobOptions, arg: NestedMeta) -> Result<()> {
 ///
 /// # Channel name
 ///
-/// ```
+/// ```ignore
 /// #[job(channel_name="foo")]
 /// ```
 ///
@@ -123,7 +127,7 @@ fn interpret_job_arg(options: &mut JobOptions, arg: NestedMeta) -> Result<()> {
 ///
 /// # Retries
 ///
-/// ```
+/// ```ignore
 /// #[job(retries = 3)]
 /// ```
 ///
@@ -131,7 +135,7 @@ fn interpret_job_arg(options: &mut JobOptions, arg: NestedMeta) -> Result<()> {
 ///
 /// # Retry backoff
 ///
-/// ```
+/// ```ignore
 /// #[job(backoff_secs=1.5)]
 /// #[job(backoff_secs=2)]
 /// ```
@@ -140,7 +144,7 @@ fn interpret_job_arg(options: &mut JobOptions, arg: NestedMeta) -> Result<()> {
 ///
 /// # Ordered
 ///
-/// ```
+/// ```ignore
 /// #[job(ordered)]
 /// #[job(ordered=true)]
 /// #[job(ordered=false)]
@@ -150,7 +154,7 @@ fn interpret_job_arg(options: &mut JobOptions, arg: NestedMeta) -> Result<()> {
 ///
 /// # Prototype
 ///
-/// ```
+/// ```ignore
 /// fn my_proto<'a, 'b>(
 ///     builder: &'a mut JobBuilder<'b>
 /// ) -> &'a mut JobBuilder<'b> {
@@ -170,7 +174,7 @@ fn interpret_job_arg(options: &mut JobOptions, arg: NestedMeta) -> Result<()> {
 /// prototype will always be applied first so that explicit options can override it.
 /// Each option can only be provided once in the attribute.
 ///
-/// ```
+/// ```ignore
 /// #[job("my_job", proto(my_proto), retries=0, ordered)]
 /// ```
 ///
@@ -223,6 +227,18 @@ pub fn job(attr: TokenStream, item: TokenStream) -> TokenStream {
         });
     }
 
+    let extract_ctx: Vec<_> = inner_fn
+        .sig
+        .inputs
+        .iter()
+        .skip(1)
+        .map(|_| {
+            quote! {
+                registry.context()
+            }
+        })
+        .collect();
+
     let expanded = quote! {
         #(#errors)*
         #[allow(non_upper_case_globals)]
@@ -234,7 +250,7 @@ pub fn job(attr: TokenStream, item: TokenStream) -> TokenStream {
                     builder #(#chain)*
                 }),
                 sqlxmq::hidden::RunFn(|registry, current_job| {
-                    registry.spawn_internal(#fq_name, inner(current_job));
+                    registry.spawn_internal(#fq_name, inner(current_job #(, #extract_ctx)*));
                 }),
             )
         };

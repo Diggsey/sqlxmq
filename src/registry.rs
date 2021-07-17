@@ -1,9 +1,12 @@
+use std::any::type_name;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Display;
 use std::future::Future;
 use std::sync::Arc;
 
+use anymap2::any::CloneAnySendSync;
+use anymap2::Map;
 use sqlx::{Pool, Postgres};
 use uuid::Uuid;
 
@@ -16,6 +19,7 @@ use crate::{JobBuilder, JobRunnerOptions};
 pub struct JobRegistry {
     error_handler: Arc<dyn Fn(&str, Box<dyn Error + Send + 'static>) + Send + Sync>,
     job_map: HashMap<&'static str, &'static NamedJob>,
+    context: Map<dyn CloneAnySendSync + Send + Sync>,
 }
 
 /// Error returned when a job is received whose name is not in the registry.
@@ -41,6 +45,7 @@ impl JobRegistry {
         Self {
             error_handler: Arc::new(Self::default_error_handler),
             job_map,
+            context: Map::new(),
         }
     }
 
@@ -51,6 +56,24 @@ impl JobRegistry {
     ) -> &mut Self {
         self.error_handler = Arc::new(error_handler);
         self
+    }
+
+    /// Provide context for the jobs.
+    pub fn set_context<C: Clone + Send + Sync + 'static>(&mut self, context: C) -> &mut Self {
+        self.context.insert(context);
+        self
+    }
+
+    /// Access job context. Will panic if context with this type has not been provided.
+    pub fn context<C: Clone + Send + Sync + 'static>(&self) -> C {
+        if let Some(c) = self.context.get::<C>() {
+            c.clone()
+        } else {
+            panic!(
+                "No context of type `{}` has been provided.",
+                type_name::<C>()
+            );
+        }
     }
 
     /// Look-up a job by name.

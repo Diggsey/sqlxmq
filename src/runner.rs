@@ -123,6 +123,13 @@ impl CurrentJob {
             .await?;
         Ok(())
     }
+
+    async fn stop_keep_alive(&mut self) {
+        if let Some(keep_alive) = self.keep_alive.take() {
+            keep_alive.stop().await;
+        }
+    }
+
     /// Complete this job and commit the provided transaction at the same time.
     /// If the transaction cannot be committed, the job will not be completed.
     pub async fn complete_with_transaction(
@@ -131,13 +138,13 @@ impl CurrentJob {
     ) -> Result<(), sqlx::Error> {
         self.delete(&mut tx).await?;
         tx.commit().await?;
-        self.keep_alive = None;
+        self.stop_keep_alive().await;
         Ok(())
     }
     /// Complete this job.
     pub async fn complete(&mut self) -> Result<(), sqlx::Error> {
         self.delete(self.pool()).await?;
-        self.keep_alive = None;
+        self.stop_keep_alive().await;
         Ok(())
     }
     /// Checkpoint this job and commit the provided transaction at the same time.
@@ -254,7 +261,7 @@ impl JobRunnerOptions {
             notify: Notify::new(),
         });
         let listener_task = start_listener(job_runner.clone()).await?;
-        Ok(OwnedHandle(task::spawn(main_loop(
+        Ok(OwnedHandle::new(task::spawn(main_loop(
             job_runner,
             listener_task,
         ))))
@@ -271,7 +278,7 @@ async fn start_listener(job_runner: Arc<JobRunner>) -> Result<OwnedHandle, sqlx:
     } else {
         listener.listen("mq").await?;
     }
-    Ok(OwnedHandle(task::spawn(async move {
+    Ok(OwnedHandle::new(task::spawn(async move {
         let mut num_errors = 0;
         loop {
             if num_errors > 0 || listener.recv().await.is_ok() {
@@ -356,7 +363,7 @@ async fn poll_and_dispatch(
         {
             let retry_backoff = to_duration(retry_backoff);
             let keep_alive = if options.keep_alive {
-                Some(OwnedHandle(task::spawn(keep_job_alive(
+                Some(OwnedHandle::new(task::spawn(keep_job_alive(
                     id,
                     options.pool.clone(),
                     retry_backoff,

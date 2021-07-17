@@ -126,13 +126,17 @@
 //! // Arguments to the `#[job]` attribute allow setting default job options.
 //! #[job(channel_name = "foo")]
 //! async fn example_job(
+//!     // The first argument should always be the current job.
 //!     mut current_job: CurrentJob,
+//!     // Additional arguments are optional, but can be used to access context
+//!     // provided via [`JobRegistry::set_context`].
+//!     message: &'static str,
 //! ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 //!     // Decode a JSON payload
 //!     let who: Option<String> = current_job.json()?;
 //!
 //!     // Do some work
-//!     println!("Hello, {}!", who.as_deref().unwrap_or("world"));
+//!     println!("{}, {}!", message, who.as_deref().unwrap_or("world"));
 //!
 //!     // Mark the job as complete
 //!     current_job.complete().await?;
@@ -171,6 +175,9 @@
 //!     let mut registry = JobRegistry::new(&[example_job]);
 //!     // Here is where you can configure the registry
 //!     // registry.set_error_handler(...)
+//!
+//!     // And add context
+//!     registry.set_context("Hello");
 //!
 //!     let runner = registry
 //!         // Create a job runner using the connection pool.
@@ -321,12 +328,22 @@ mod tests {
         Ok(())
     }
 
+    #[job]
+    async fn example_job_with_ctx(
+        mut current_job: CurrentJob,
+        ctx1: i32,
+        ctx2: &'static str,
+    ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+        assert_eq!(ctx1, 42);
+        assert_eq!(ctx2, "Hello, world!");
+        current_job.complete().await?;
+        Ok(())
+    }
+
     async fn named_job_runner(pool: &Pool<Postgres>) -> OwnedHandle {
-        JobRegistry::new(&[example_job1, example_job2])
-            .runner(pool)
-            .run()
-            .await
-            .unwrap()
+        let mut registry = JobRegistry::new(&[example_job1, example_job2, example_job_with_ctx]);
+        registry.set_context(42).set_context("Hello, world!");
+        registry.runner(pool).run().await.unwrap()
     }
 
     async fn pause() {
@@ -339,160 +356,179 @@ mod tests {
 
     #[tokio::test]
     async fn it_can_spawn_job() {
-        let pool = &*test_pool().await;
-        let (_runner, counter) =
-            test_job_runner(&pool, |mut job| async move { job.complete().await }).await;
+        {
+            let pool = &*test_pool().await;
+            let (_runner, counter) =
+                test_job_runner(&pool, |mut job| async move { job.complete().await }).await;
 
-        assert_eq!(counter.load(Ordering::SeqCst), 0);
-        JobBuilder::new("foo").spawn(pool).await.unwrap();
+            assert_eq!(counter.load(Ordering::SeqCst), 0);
+            JobBuilder::new("foo").spawn(pool).await.unwrap();
+            pause().await;
+            assert_eq!(counter.load(Ordering::SeqCst), 1);
+        }
         pause().await;
-        assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
     async fn it_runs_jobs_in_order() {
-        let pool = &*test_pool().await;
-        let (tx, mut rx) = mpsc::unbounded();
+        {
+            let pool = &*test_pool().await;
+            let (tx, mut rx) = mpsc::unbounded();
 
-        let (_runner, counter) = test_job_runner(&pool, move |job| {
-            let tx = tx.clone();
-            async move {
-                tx.unbounded_send(job).unwrap();
-            }
-        })
-        .await;
+            let (_runner, counter) = test_job_runner(&pool, move |job| {
+                let tx = tx.clone();
+                async move {
+                    tx.unbounded_send(job).unwrap();
+                }
+            })
+            .await;
 
-        assert_eq!(counter.load(Ordering::SeqCst), 0);
-        JobBuilder::new("foo")
-            .set_ordered(true)
-            .spawn(pool)
-            .await
-            .unwrap();
-        JobBuilder::new("bar")
-            .set_ordered(true)
-            .spawn(pool)
-            .await
-            .unwrap();
+            assert_eq!(counter.load(Ordering::SeqCst), 0);
+            JobBuilder::new("foo")
+                .set_ordered(true)
+                .spawn(pool)
+                .await
+                .unwrap();
+            JobBuilder::new("bar")
+                .set_ordered(true)
+                .spawn(pool)
+                .await
+                .unwrap();
 
+            pause().await;
+            assert_eq!(counter.load(Ordering::SeqCst), 1);
+
+            let mut job = rx.next().await.unwrap();
+            job.complete().await.unwrap();
+
+            pause().await;
+            assert_eq!(counter.load(Ordering::SeqCst), 2);
+        }
         pause().await;
-        assert_eq!(counter.load(Ordering::SeqCst), 1);
-
-        let mut job = rx.next().await.unwrap();
-        job.complete().await.unwrap();
-
-        pause().await;
-        assert_eq!(counter.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
     async fn it_runs_jobs_in_parallel() {
-        let pool = &*test_pool().await;
-        let (tx, mut rx) = mpsc::unbounded();
+        {
+            let pool = &*test_pool().await;
+            let (tx, mut rx) = mpsc::unbounded();
 
-        let (_runner, counter) = test_job_runner(&pool, move |job| {
-            let tx = tx.clone();
-            async move {
-                tx.unbounded_send(job).unwrap();
+            let (_runner, counter) = test_job_runner(&pool, move |job| {
+                let tx = tx.clone();
+                async move {
+                    tx.unbounded_send(job).unwrap();
+                }
+            })
+            .await;
+
+            assert_eq!(counter.load(Ordering::SeqCst), 0);
+            JobBuilder::new("foo").spawn(pool).await.unwrap();
+            JobBuilder::new("bar").spawn(pool).await.unwrap();
+
+            pause().await;
+            assert_eq!(counter.load(Ordering::SeqCst), 2);
+
+            for _ in 0..2 {
+                let mut job = rx.next().await.unwrap();
+                job.complete().await.unwrap();
             }
-        })
-        .await;
-
-        assert_eq!(counter.load(Ordering::SeqCst), 0);
-        JobBuilder::new("foo").spawn(pool).await.unwrap();
-        JobBuilder::new("bar").spawn(pool).await.unwrap();
-
-        pause().await;
-        assert_eq!(counter.load(Ordering::SeqCst), 2);
-
-        for _ in 0..2 {
-            let mut job = rx.next().await.unwrap();
-            job.complete().await.unwrap();
         }
+        pause().await;
     }
 
     #[tokio::test]
     async fn it_retries_failed_jobs() {
-        let pool = &*test_pool().await;
-        let (_runner, counter) = test_job_runner(&pool, move |_| async {}).await;
+        {
+            let pool = &*test_pool().await;
+            let (_runner, counter) = test_job_runner(&pool, move |_| async {}).await;
 
-        let backoff = 500;
+            let backoff = 500;
 
-        assert_eq!(counter.load(Ordering::SeqCst), 0);
-        JobBuilder::new("foo")
-            .set_retry_backoff(Duration::from_millis(backoff))
-            .set_retries(2)
-            .spawn(pool)
-            .await
-            .unwrap();
+            assert_eq!(counter.load(Ordering::SeqCst), 0);
+            JobBuilder::new("foo")
+                .set_retry_backoff(Duration::from_millis(backoff))
+                .set_retries(2)
+                .spawn(pool)
+                .await
+                .unwrap();
 
-        // First attempt
+            // First attempt
+            pause().await;
+            assert_eq!(counter.load(Ordering::SeqCst), 1);
+
+            // Second attempt
+            pause_ms(backoff).await;
+            pause().await;
+            assert_eq!(counter.load(Ordering::SeqCst), 2);
+
+            // Third attempt
+            pause_ms(backoff * 2).await;
+            pause().await;
+            assert_eq!(counter.load(Ordering::SeqCst), 3);
+
+            // No more attempts
+            pause_ms(backoff * 5).await;
+            assert_eq!(counter.load(Ordering::SeqCst), 3);
+        }
         pause().await;
-        assert_eq!(counter.load(Ordering::SeqCst), 1);
-
-        // Second attempt
-        pause_ms(backoff).await;
-        pause().await;
-        assert_eq!(counter.load(Ordering::SeqCst), 2);
-
-        // Third attempt
-        pause_ms(backoff * 2).await;
-        pause().await;
-        assert_eq!(counter.load(Ordering::SeqCst), 3);
-
-        // No more attempts
-        pause_ms(backoff * 5).await;
-        assert_eq!(counter.load(Ordering::SeqCst), 3);
     }
 
     #[tokio::test]
     async fn it_can_checkpoint_jobs() {
-        let pool = &*test_pool().await;
-        let (_runner, counter) = test_job_runner(&pool, move |mut current_job| async move {
-            let state: bool = current_job.json().unwrap().unwrap();
-            if state {
-                current_job.complete().await.unwrap();
-            } else {
-                current_job
-                    .checkpoint(Checkpoint::new().set_json(&true).unwrap())
-                    .await
-                    .unwrap();
-            }
-        })
-        .await;
+        {
+            let pool = &*test_pool().await;
+            let (_runner, counter) = test_job_runner(&pool, move |mut current_job| async move {
+                let state: bool = current_job.json().unwrap().unwrap();
+                if state {
+                    current_job.complete().await.unwrap();
+                } else {
+                    current_job
+                        .checkpoint(Checkpoint::new().set_json(&true).unwrap())
+                        .await
+                        .unwrap();
+                }
+            })
+            .await;
 
-        let backoff = 200;
+            let backoff = 200;
 
-        assert_eq!(counter.load(Ordering::SeqCst), 0);
-        JobBuilder::new("foo")
-            .set_retry_backoff(Duration::from_millis(backoff))
-            .set_retries(5)
-            .set_json(&false)
-            .unwrap()
-            .spawn(pool)
-            .await
-            .unwrap();
+            assert_eq!(counter.load(Ordering::SeqCst), 0);
+            JobBuilder::new("foo")
+                .set_retry_backoff(Duration::from_millis(backoff))
+                .set_retries(5)
+                .set_json(&false)
+                .unwrap()
+                .spawn(pool)
+                .await
+                .unwrap();
 
-        // First attempt
+            // First attempt
+            pause().await;
+            assert_eq!(counter.load(Ordering::SeqCst), 1);
+
+            // Second attempt
+            pause_ms(backoff).await;
+            pause().await;
+            assert_eq!(counter.load(Ordering::SeqCst), 2);
+
+            // No more attempts
+            pause_ms(backoff * 3).await;
+            assert_eq!(counter.load(Ordering::SeqCst), 2);
+        }
         pause().await;
-        assert_eq!(counter.load(Ordering::SeqCst), 1);
-
-        // Second attempt
-        pause_ms(backoff).await;
-        pause().await;
-        assert_eq!(counter.load(Ordering::SeqCst), 2);
-
-        // No more attempts
-        pause_ms(backoff * 3).await;
-        assert_eq!(counter.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
     async fn it_can_use_registry() {
-        let pool = &*test_pool().await;
-        let _runner = named_job_runner(pool).await;
+        {
+            let pool = &*test_pool().await;
+            let _runner = named_job_runner(pool).await;
 
-        example_job1.builder().spawn(pool).await.unwrap();
-        example_job2.builder().spawn(pool).await.unwrap();
+            example_job1.builder().spawn(pool).await.unwrap();
+            example_job2.builder().spawn(pool).await.unwrap();
+            example_job_with_ctx.builder().spawn(pool).await.unwrap();
+            pause().await;
+        }
         pause().await;
     }
 }

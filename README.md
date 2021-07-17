@@ -127,13 +127,17 @@ use sqlxmq::{job, CurrentJob};
 // Arguments to the `#[job]` attribute allow setting default job options.
 #[job(channel_name = "foo")]
 async fn example_job(
+    // The first argument should always be the current job.
     mut current_job: CurrentJob,
+    // Additional arguments are optional, but can be used to access context
+    // provided via `JobRegistry::set_context`.
+    message: &'static str,
 ) -> sqlx::Result<()> {
     // Decode a JSON payload
     let who: Option<String> = current_job.json()?;
 
     // Do some work
-    println!("Hello, {}!", who.as_deref().unwrap_or("world"));
+    println!("{}, {}!", message, who.as_deref().unwrap_or("world"));
 
     // Mark the job as complete
     current_job.complete().await?;
@@ -159,6 +163,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut registry = JobRegistry::new(&[example_job]);
     // Here is where you can configure the registry
     // registry.set_error_handler(...)
+
+    // And add context
+    registry.set_context("Hello");
 
     let runner = registry
         // Create a job runner using the connection pool.
