@@ -63,7 +63,7 @@ fn interpret_job_arg(options: &mut JobOptions, arg: NestedMeta) -> Result<()> {
                         options.channel_name = Some(s.value());
                     }
                     ("retries", OptionValue::Lit(Lit::Int(n))) if options.retries.is_none() => {
-                        options.name = Some(n.base10_parse()?);
+                        options.retries = Some(n.base10_parse()?);
                     }
                     ("backoff_secs", OptionValue::Lit(Lit::Float(n)))
                         if options.backoff_secs.is_none() =>
