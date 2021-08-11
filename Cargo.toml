@@ -16,7 +16,7 @@ members = ["sqlxmq_macros", "sqlxmq_stress"]
 
 [dependencies]
 sqlx = { version = "0.5.2", features = ["postgres", "chrono", "uuid"] }
-tokio = { version = "=1.8.0", features = ["full"] }
+tokio = { version = "1.8.3", features = ["full"] }
 dotenv = "0.15.0"
 chrono = "0.4.19"
 uuid = { version = "0.8.2", features = ["v4"] }
