@@ -77,6 +77,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let pool = Pool::connect(&env::var("DATABASE_URL")?).await?;
 
+    // Remove possible artifacts of previous canceled (ctrl+c) runs
+    sqlx::query!("delete from mq_payloads")
+        .execute(&pool)
+        .await?;
+    sqlx::query!("delete from mq_msgs").execute(&pool).await?;
+
     let registry = JobRegistry::new(&[example_job]);
 
     let _runner = registry
