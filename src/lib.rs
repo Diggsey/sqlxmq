@@ -240,6 +240,8 @@ pub use utils::OwnedHandle;
 /// of these errors is returned.
 pub fn should_retry(error: &sqlx::Error) -> bool {
     if let Some(db_error) = error.as_database_error() {
+        // It's more readable as a match
+        #[allow(clippy::match_like_matches_macro)]
         match (db_error.code().as_deref(), db_error.constraint().as_deref()) {
             // Unique constraint violation on ordered channel
             (Some("23505"), Some("mq_msgs_channel_name_channel_args_after_message_id_idx")) => true,
