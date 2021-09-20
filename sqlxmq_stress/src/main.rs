@@ -1,5 +1,6 @@
 use std::env;
 use std::error::Error;
+use std::process::abort;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
@@ -66,7 +67,13 @@ async fn start_job(
 async fn schedule_tasks(num_jobs: usize, interval: Duration, pool: Pool<Postgres>) {
     let mut stream = tokio::time::interval(interval);
     for i in 0..num_jobs {
-        task::spawn(start_job(pool.clone(), i));
+        let pool = pool.clone();
+        task::spawn(async move {
+            if let Err(e) = start_job(pool, i).await {
+                eprintln!("Failed to start job: {:?}", e);
+                abort();
+            }
+        });
         stream.tick().await;
     }
 }
@@ -76,6 +83,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let _ = dotenv::dotenv();
 
     let pool = Pool::connect(&env::var("DATABASE_URL")?).await?;
+
+    // Make sure the queues are empty
+    sqlxmq::clear_all(&pool).await?;
 
     let registry = JobRegistry::new(&[example_job]);
 

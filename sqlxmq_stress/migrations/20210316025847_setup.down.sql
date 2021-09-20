@@ -1,3 +1,5 @@
+DROP FUNCTION mq_clear;
+DROP FUNCTION mq_clear_all;
 DROP FUNCTION mq_checkpoint;
 DROP FUNCTION mq_keep_alive;
 DROP FUNCTION mq_delete;

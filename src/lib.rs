@@ -234,6 +234,27 @@ pub use spawn::*;
 pub use sqlxmq_macros::job;
 pub use utils::OwnedHandle;
 
+/// Helper function to determine if a particular error condition is retryable.
+///
+/// For best results, database operations should be automatically retried if one
+/// of these errors is returned.
+pub fn should_retry(error: &sqlx::Error) -> bool {
+    if let Some(db_error) = error.as_database_error() {
+        match (db_error.code().as_deref(), db_error.constraint().as_deref()) {
+            // Unique constraint violation on ordered channel
+            (Some("23505"), Some("mq_msgs_channel_name_channel_args_after_message_id_idx")) => true,
+            // Serialization failure
+            (Some("40001"), _) => true,
+            // Deadlock detected
+            (Some("40P01"), _) => true,
+            // Other
+            _ => false,
+        }
+    } else {
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,6 +386,52 @@ mod tests {
             JobBuilder::new("foo").spawn(pool).await.unwrap();
             pause().await;
             assert_eq!(counter.load(Ordering::SeqCst), 1);
+        }
+        pause().await;
+    }
+
+    #[tokio::test]
+    async fn it_can_clear_jobs() {
+        {
+            let pool = &*test_pool().await;
+            JobBuilder::new("foo")
+                .set_channel_name("foo")
+                .spawn(pool)
+                .await
+                .unwrap();
+            JobBuilder::new("foo")
+                .set_channel_name("foo")
+                .spawn(pool)
+                .await
+                .unwrap();
+            JobBuilder::new("foo")
+                .set_channel_name("bar")
+                .spawn(pool)
+                .await
+                .unwrap();
+            JobBuilder::new("foo")
+                .set_channel_name("bar")
+                .spawn(pool)
+                .await
+                .unwrap();
+            JobBuilder::new("foo")
+                .set_channel_name("baz")
+                .spawn(pool)
+                .await
+                .unwrap();
+            JobBuilder::new("foo")
+                .set_channel_name("baz")
+                .spawn(pool)
+                .await
+                .unwrap();
+
+            sqlxmq::clear(pool, &["foo", "baz"]).await.unwrap();
+
+            let (_runner, counter) =
+                test_job_runner(&pool, |mut job| async move { job.complete().await }).await;
+
+            pause().await;
+            assert_eq!(counter.load(Ordering::SeqCst), 2);
         }
         pause().await;
     }
