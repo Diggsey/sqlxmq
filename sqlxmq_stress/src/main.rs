@@ -59,7 +59,11 @@ async fn start_job(
             start_time: INSTANT_EPOCH.elapsed(),
         })?
         .spawn(&pool)
-        .await?;
+        .await
+        .map_err(|e| {
+            eprintln!("sqlxmq_stress::start_job {}", e);
+            e
+        })?;
     Ok(())
 }
 
