@@ -243,6 +243,8 @@ pub fn should_retry(error: &sqlx::Error) -> bool {
         // It's more readable as a match
         #[allow(clippy::match_like_matches_macro)]
         match (db_error.code().as_deref(), db_error.constraint().as_deref()) {
+            // Foreign key constraint violation on ordered channel
+            (Some("23503"), Some("mq_msgs_after_message_id_fkey")) => true,
             // Unique constraint violation on ordered channel
             (Some("23505"), Some("mq_msgs_channel_name_channel_args_after_message_id_idx")) => true,
             // Serialization failure
