@@ -296,7 +296,7 @@ mod tests {
 
         let _ = dotenv::dotenv();
 
-        INIT_LOGGER.call_once(|| pretty_env_logger::init());
+        INIT_LOGGER.call_once(pretty_env_logger::init);
 
         let pool = Pool::connect(&env::var("DATABASE_URL").unwrap())
             .await
@@ -384,7 +384,7 @@ mod tests {
         {
             let pool = &*test_pool().await;
             let (_runner, counter) =
-                test_job_runner(&pool, |mut job| async move { job.complete().await }).await;
+                test_job_runner(pool, |mut job| async move { job.complete().await }).await;
 
             assert_eq!(counter.load(Ordering::SeqCst), 0);
             JobBuilder::new("foo").spawn(pool).await.unwrap();
@@ -432,7 +432,7 @@ mod tests {
             sqlxmq::clear(pool, &["foo", "baz"]).await.unwrap();
 
             let (_runner, counter) =
-                test_job_runner(&pool, |mut job| async move { job.complete().await }).await;
+                test_job_runner(pool, |mut job| async move { job.complete().await }).await;
 
             pause().await;
             assert_eq!(counter.load(Ordering::SeqCst), 2);
@@ -446,7 +446,7 @@ mod tests {
             let pool = &*test_pool().await;
             let (tx, mut rx) = mpsc::unbounded();
 
-            let (_runner, counter) = test_job_runner(&pool, move |job| {
+            let (_runner, counter) = test_job_runner(pool, move |job| {
                 let tx = tx.clone();
                 async move {
                     tx.unbounded_send(job).unwrap();
@@ -484,7 +484,7 @@ mod tests {
             let pool = &*test_pool().await;
             let (tx, mut rx) = mpsc::unbounded();
 
-            let (_runner, counter) = test_job_runner(&pool, move |job| {
+            let (_runner, counter) = test_job_runner(pool, move |job| {
                 let tx = tx.clone();
                 async move {
                     tx.unbounded_send(job).unwrap();
@@ -511,7 +511,7 @@ mod tests {
     async fn it_retries_failed_jobs() {
         {
             let pool = &*test_pool().await;
-            let (_runner, counter) = test_job_runner(&pool, move |_| async {}).await;
+            let (_runner, counter) = test_job_runner(pool, move |_| async {}).await;
 
             let backoff = 500;
 
@@ -548,7 +548,7 @@ mod tests {
     async fn it_can_checkpoint_jobs() {
         {
             let pool = &*test_pool().await;
-            let (_runner, counter) = test_job_runner(&pool, move |mut current_job| async move {
+            let (_runner, counter) = test_job_runner(pool, move |mut current_job| async move {
                 let state: bool = current_job.json().unwrap().unwrap();
                 if state {
                     current_job.complete().await.unwrap();
