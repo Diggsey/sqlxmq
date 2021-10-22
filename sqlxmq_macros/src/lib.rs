@@ -6,10 +6,12 @@
 use std::mem;
 
 use proc_macro::TokenStream;
-use quote::quote;
+use proc_macro2::TokenStream as TokenStream2;
+use quote::{quote, ToTokens, TokenStreamExt};
 use syn::{
-    parse_macro_input, parse_quote, AttributeArgs, Error, ItemFn, Lit, Meta, NestedMeta, Path,
-    Result, Visibility,
+    parse::{Parse, ParseStream},
+    parse_macro_input, parse_quote, AttrStyle, Attribute, AttributeArgs, Error, Lit, Meta,
+    NestedMeta, Path, Result, Signature, Visibility,
 };
 
 #[derive(Default)]
@@ -88,6 +90,44 @@ fn interpret_job_arg(options: &mut JobOptions, arg: NestedMeta) -> Result<()> {
         _ => return error(arg),
     }
     Ok(())
+}
+
+#[derive(Clone)]
+struct MaybeItemFn {
+    attrs: Vec<Attribute>,
+    vis: Visibility,
+    sig: Signature,
+    block: TokenStream2,
+}
+
+/// This parses a `TokenStream` into a `MaybeItemFn`
+/// (just like `ItemFn`, but skips parsing the body).
+impl Parse for MaybeItemFn {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let attrs = input.call(syn::Attribute::parse_outer)?;
+        let vis: Visibility = input.parse()?;
+        let sig: Signature = input.parse()?;
+        let block: TokenStream2 = input.parse()?;
+        Ok(Self {
+            attrs,
+            vis,
+            sig,
+            block,
+        })
+    }
+}
+
+impl ToTokens for MaybeItemFn {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        tokens.append_all(
+            self.attrs
+                .iter()
+                .filter(|attr| matches!(attr.style, AttrStyle::Outer)),
+        );
+        self.vis.to_tokens(tokens);
+        self.sig.to_tokens(tokens);
+        self.block.to_tokens(tokens);
+    }
 }
 
 /// Marks a function as being a background job.
@@ -181,7 +221,7 @@ fn interpret_job_arg(options: &mut JobOptions, arg: NestedMeta) -> Result<()> {
 #[proc_macro_attribute]
 pub fn job(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(attr as AttributeArgs);
-    let mut inner_fn = parse_macro_input!(item as ItemFn);
+    let mut inner_fn = parse_macro_input!(item as MaybeItemFn);
 
     let mut options = JobOptions::default();
     let mut errors = Vec::new();

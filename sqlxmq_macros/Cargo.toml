@@ -1,6 +1,6 @@
 [package]
 name = "sqlxmq_macros"
-version = "0.3.2"
+version = "0.3.3"
 authors = ["Diggory Blake <diggsey@googlemail.com>"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
@@ -14,5 +14,6 @@ documentation = "https://docs.rs/sqlxmq"
 proc-macro = true
 
 [dependencies]
-syn = { version = "1.0.64", features = ["full"] }
-quote = "1.0.9"
+syn = { version = "1.0.80", features = ["full"] }
+quote = "1.0.10"
+proc-macro2 = "1.0.30"

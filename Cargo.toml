@@ -1,6 +1,6 @@
 [package]
 name = "sqlxmq"
-version = "0.3.2"
+version = "0.3.3"
 authors = ["Diggory Blake <diggsey@googlemail.com>"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
@@ -23,7 +23,7 @@ uuid = { version = "0.8.2", features = ["v4"] }
 log = "0.4.14"
 serde_json = "1.0.64"
 serde = "1.0.124"
-sqlxmq_macros = { version = "0.3.2", path = "sqlxmq_macros" }
+sqlxmq_macros = { version = "0.3.3", path = "sqlxmq_macros" }
 anymap2 = "0.13.0"
 
 [features]
