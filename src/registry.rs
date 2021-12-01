@@ -4,6 +4,7 @@ use std::error::Error;
 use std::fmt::Display;
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anymap2::any::CloneAnySendSync;
 use anymap2::Map;
@@ -83,7 +84,7 @@ impl JobRegistry {
 
     /// The default error handler implementation, which simply logs the error.
     pub fn default_error_handler(name: &str, error: Box<dyn Error + Send + 'static>) {
-        log::error!("Job {} failed: {}", name, error);
+        log::error!("Job `{}` failed: {}", name, error);
     }
 
     #[doc(hidden)]
@@ -94,8 +95,16 @@ impl JobRegistry {
     ) {
         let error_handler = self.error_handler.clone();
         tokio::spawn(async move {
+            let start_time = Instant::now();
+            log::info!("Job `{}` started.", name);
             if let Err(e) = f.await {
                 error_handler(name, e.into());
+            } else {
+                log::info!(
+                    "Job `{}` completed in {}s.",
+                    name,
+                    start_time.elapsed().as_secs_f64()
+                );
             }
         });
     }
