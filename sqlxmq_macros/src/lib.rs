@@ -231,6 +231,11 @@ pub fn job(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
 
+    let outer_docs = inner_fn
+        .attrs
+        .iter()
+        .filter(|attr| attr.path.is_ident("doc"));
+
     let vis = mem::replace(&mut inner_fn.vis, Visibility::Inherited);
     let name = mem::replace(&mut inner_fn.sig.ident, parse_quote! {inner});
     let fq_name = if let Some(name) = options.name {
@@ -281,6 +286,7 @@ pub fn job(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         #(#errors)*
+        #(#outer_docs)*
         #[allow(non_upper_case_globals)]
         #vis static #name: &'static sqlxmq::NamedJob = &{
             #inner_fn
