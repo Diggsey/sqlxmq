@@ -81,7 +81,20 @@ async fn schedule_tasks(num_jobs: usize, interval: Duration, pool: Pool<Postgres
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let _ = dotenv::dotenv();
+    standard().await?;
+    locking().await?;
+    Ok(())
+}
 
+async fn standard() -> Result<(), Box<dyn Error>> {
+    let min_jobs = env::var("MIN_JOBS")
+        .expect("MIN_JOBS should be set in .env or when called")
+        .parse::<usize>()
+        .expect("MIN_JOBS should be a usize number");
+    let max_jobs = env::var("MAX_JOBS")
+        .expect("MAX_JOBS should be set in .env or when called")
+        .parse::<usize>()
+        .expect("MAX_JOBS should be a usize number");
     let pool = Pool::connect(&env::var("DATABASE_URL")?).await?;
 
     // Make sure the queues are empty
@@ -91,7 +104,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let _runner = registry
         .runner(&pool)
-        .set_concurrency(50, 100)
+        .set_concurrency(min_jobs, max_jobs)
         .run()
         .await?;
     let num_jobs = 10000;
@@ -117,6 +130,64 @@ async fn main() -> Result<(), Box<dyn Error>> {
     );
     let throughput = num_jobs as f64 / total_duration.as_secs_f64();
 
+    println!("Standard:");
+    println!("min: {}s", min.as_secs_f64());
+    println!("max: {}s", max.as_secs_f64());
+    println!("median: {}s", median.as_secs_f64());
+    println!("95th percentile: {}s", pct.as_secs_f64());
+    println!("throughput: {}/s", throughput);
+
+    // The job runner will continue listening and running
+    // jobs until `runner` is dropped.
+    Ok(())
+}
+
+async fn locking() -> Result<(), Box<dyn Error>> {
+    let min_jobs = env::var("MIN_JOBS")
+        .expect("MIN_JOBS should be set in .env or when called")
+        .parse::<usize>()
+        .expect("MIN_JOBS should be a usize number");
+    let max_jobs = env::var("MAX_JOBS")
+        .expect("MAX_JOBS should be set in .env or when called")
+        .parse::<usize>()
+        .expect("MAX_JOBS should be a usize number");
+    let pool = Pool::connect(&env::var("DATABASE_URL")?).await?;
+
+    // Make sure the queues are empty
+    sqlxmq::clear_all(&pool).await?;
+
+    let registry = JobRegistry::new(&[example_job]);
+
+    let _runner = registry
+        .runner(&pool)
+        .set_concurrency(min_jobs, max_jobs)
+        .set_locking(true)
+        .run()
+        .await?;
+    let num_jobs = 10000;
+    let interval = Duration::from_nanos(700_000);
+
+    let (tx, rx) = mpsc::unbounded();
+    *CHANNEL.write()? = tx;
+
+    let start_time = Instant::now();
+    task::spawn(schedule_tasks(num_jobs, interval, pool.clone()));
+
+    let mut results: Vec<_> = rx.take(num_jobs).collect().await;
+    let total_duration = start_time.elapsed();
+
+    assert_eq!(results.len(), num_jobs);
+
+    results.sort_by_key(|r| r.duration);
+    let (min, max, median, pct) = (
+        results[0].duration,
+        results[num_jobs - 1].duration,
+        results[num_jobs / 2].duration,
+        results[(num_jobs * 19) / 20].duration,
+    );
+    let throughput = num_jobs as f64 / total_duration.as_secs_f64();
+
+    println!("Locking:");
     println!("min: {}s", min.as_secs_f64());
     println!("max: {}s", max.as_secs_f64());
     println!("median: {}s", median.as_secs_f64());

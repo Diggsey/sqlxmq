@@ -1,0 +1,8 @@
+# Create database
+database url is set in .env
+
+`pqsl -c 'create database sqlxmq_stress'`
+
+# run migrations
+
+`sqlx migrate run`

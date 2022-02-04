@@ -23,6 +23,7 @@ pub struct JobRunnerOptions {
     dispatch: Opaque<Arc<dyn Fn(CurrentJob) + Send + Sync + 'static>>,
     pool: Pool<Postgres>,
     keep_alive: bool,
+    locking: bool,
 }
 
 #[derive(Debug)]
@@ -220,7 +221,17 @@ impl JobRunnerOptions {
             keep_alive: true,
             dispatch: Opaque(Arc::new(f)),
             pool: pool.clone(),
+            locking: false,
         }
+    }
+
+    /// If locking is setup a postgres advisor transaction lock "pg_try_advisory_xact_lock" will
+    /// be used when selecting jobs. This is useful when running more then one runner.
+    ///
+    /// Defaults to `false`.
+    pub fn set_locking(&mut self, locking: bool) -> &mut Self {
+        self.locking = locking;
+        self
     }
     /// Set the concurrency limits for this job runner. When the number of active
     /// jobs falls below the minimum, the runner will poll for more, up to the maximum.
@@ -314,19 +325,11 @@ fn to_duration(interval: PgInterval) -> Duration {
     }
 }
 
-async fn poll_and_dispatch(
+async fn handle_messages(
     job_runner: &Arc<JobRunner>,
-    batch_size: i32,
+    messages: Vec<PolledMessage>,
 ) -> Result<Duration, sqlx::Error> {
-    log::info!("Polling for messages");
-
     let options = &job_runner.options;
-    let messages = sqlx::query_as::<_, PolledMessage>("SELECT * FROM mq_poll($1, $2)")
-        .bind(&options.channel_names)
-        .bind(batch_size)
-        .fetch_all(&options.pool)
-        .await?;
-
     let ids_to_delete: Vec<_> = messages
         .iter()
         .filter(|msg| msg.is_committed == Some(false))
@@ -385,6 +388,35 @@ async fn poll_and_dispatch(
     }
 
     Ok(wait_time)
+}
+
+async fn poll_and_dispatch(
+    job_runner: &Arc<JobRunner>,
+    batch_size: i32,
+) -> Result<Duration, sqlx::Error> {
+    log::info!("Polling for messages");
+
+    let options = &job_runner.options;
+    if !options.locking {
+        let messages = sqlx::query_as::<_, PolledMessage>("SELECT * FROM mq_poll($1, $2)")
+            .bind(&options.channel_names)
+            .bind(batch_size)
+            .fetch_all(&options.pool)
+            .await?;
+
+        handle_messages(job_runner, messages).await
+    } else {
+        let transaction = options.pool.begin().await?;
+        let messages = sqlx::query_as::<_, PolledMessage>("SELECT * FROM mq_poll_locking($1, $2)")
+            .bind(&options.channel_names)
+            .bind(batch_size)
+            .fetch_all(&options.pool)
+            .await?;
+
+        let results = handle_messages(job_runner, messages).await;
+        transaction.commit().await?;
+        results
+    }
 }
 
 async fn main_loop(job_runner: Arc<JobRunner>, _listener_task: OwnedHandle) {
