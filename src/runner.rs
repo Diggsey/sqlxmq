@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::postgres::types::PgInterval;
 use sqlx::postgres::PgListener;
 use sqlx::{Pool, Postgres};
-use tokio::sync::Notify;
+use tokio::sync::{oneshot, Notify};
 use tokio::task;
 use uuid::Uuid;
 
@@ -265,6 +265,58 @@ impl JobRunnerOptions {
             job_runner,
             listener_task,
         ))))
+    }
+
+    /// Run a single job and then return. Intended for use by tests. The job should
+    /// have been spawned normally and be ready to run.
+    pub async fn test_one(&self) -> Result<(), sqlx::Error> {
+        let options = self.clone();
+        let job_runner = Arc::new(JobRunner {
+            options,
+            running_jobs: AtomicUsize::new(0),
+            notify: Notify::new(),
+        });
+
+        log::info!("Polling for single message");
+        let mut messages = sqlx::query_as::<_, PolledMessage>("SELECT * FROM mq_poll($1, 1)")
+            .bind(&self.channel_names)
+            .fetch_all(&self.pool)
+            .await?;
+
+        assert_eq!(messages.len(), 1, "Expected one message to be ready");
+        let msg = messages.pop().unwrap();
+
+        if let PolledMessage {
+            id: Some(id),
+            is_committed: Some(true),
+            name: Some(name),
+            payload_json,
+            payload_bytes,
+            ..
+        } = msg
+        {
+            let (tx, rx) = oneshot::channel::<()>();
+            let keep_alive = Some(OwnedHandle::new(task::spawn(async move {
+                let _tx = tx;
+                loop {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            })));
+            let current_job = CurrentJob {
+                id,
+                name,
+                payload_json,
+                payload_bytes,
+                job_runner: job_runner.clone(),
+                keep_alive,
+            };
+            job_runner.running_jobs.fetch_add(1, Ordering::SeqCst);
+            (self.dispatch)(current_job);
+
+            // Wait for job to complete
+            let _ = rx.await;
+        }
+        Ok(())
     }
 }
 
