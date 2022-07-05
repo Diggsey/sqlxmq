@@ -134,7 +134,7 @@ async fn example_job(
     message: &'static str,
 ) -> sqlx::Result<()> {
     // Decode a JSON payload
-    let who: Option<String> = current_job.json()?;
+    let who: Option<String> = current_job.json().unwrap_or_default();
 
     // Do some work
     println!("{}, {}!", message, who.as_deref().unwrap_or("world"));
