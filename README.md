@@ -190,7 +190,7 @@ The final step is to actually run a job.
 example_job.builder()
     // This is where we can override job configuration
     .set_channel_name("bar")
-    .set_json("John")
+    .set_json("John")?
     .spawn(&pool)
     .await?;
 ```
