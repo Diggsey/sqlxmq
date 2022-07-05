@@ -150,7 +150,7 @@ pub async fn commit<'b, E: sqlx::Executor<'b, Database = Postgres>>(
     Ok(())
 }
 
-/// Clear jobs from the specified queues.
+/// Clear jobs from the specified channels.
 pub async fn clear<'b, E: sqlx::Executor<'b, Database = Postgres>>(
     executor: E,
     channel_names: &[&str],
@@ -162,7 +162,7 @@ pub async fn clear<'b, E: sqlx::Executor<'b, Database = Postgres>>(
     Ok(())
 }
 
-/// Clear jobs from the specified queues.
+/// Clear jobs from all channels.
 pub async fn clear_all<'b, E: sqlx::Executor<'b, Database = Postgres>>(
     executor: E,
 ) -> Result<(), sqlx::Error> {
