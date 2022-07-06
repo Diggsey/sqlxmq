@@ -1,8 +1,10 @@
-# sqlxmq
-
 [![CI Status](https://github.com/Diggsey/sqlxmq/workflows/CI/badge.svg)](https://github.com/Diggsey/sqlxmq/actions?query=workflow%3ACI)
 [![Documentation](https://docs.rs/sqlxmq/badge.svg)](https://docs.rs/sqlxmq)
 [![crates.io](https://img.shields.io/crates/v/sqlxmq.svg)](https://crates.io/crates/sqlxmq)
+
+<!-- cargo-sync-readme start -->
+
+# sqlxmq
 
 A job queue built on `sqlx` and `PostgreSQL`.
 
@@ -122,6 +124,8 @@ to conflict with your own schema.
 The first step is to define a function to be run on the job queue.
 
 ```rust
+use std::error::Error;
+
 use sqlxmq::{job, CurrentJob};
 
 // Arguments to the `#[job]` attribute allow setting default job options.
@@ -130,9 +134,9 @@ async fn example_job(
     // The first argument should always be the current job.
     mut current_job: CurrentJob,
     // Additional arguments are optional, but can be used to access context
-    // provided via `JobRegistry::set_context`.
+    // provided via [`JobRegistry::set_context`].
     message: &'static str,
-) -> sqlx::Result<()> {
+) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // Decode a JSON payload
     let who: Option<String> = current_job.json()?;
 
@@ -151,8 +155,11 @@ async fn example_job(
 Next we need to create a job runner: this is what listens for new jobs
 and executes them.
 
-```rust
+```rust,no_run
+use std::error::Error;
+
 use sqlxmq::JobRegistry;
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -179,6 +186,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // The job runner will continue listening and running
     // jobs until `runner` is dropped.
+    Ok(())
 }
 ```
 
@@ -194,3 +202,21 @@ example_job.builder()
     .spawn(&pool)
     .await?;
 ```
+
+<!-- cargo-sync-readme end -->
+
+## Note on README
+
+Most of the readme is automatically copied from the crate documentation by [cargo-readme-sync][].
+This way the readme is always in sync with the docs and examples are tested.
+
+So if you find a part of the readme you'd like to change between `<!-- cargo-sync-readme start -->`
+and `<!-- cargo-sync-readme end -->` markers, don't edit `README.md` directly, but rather change
+the documentation on top of `src/lib.rs` and then synchronize the readme with:
+```bash
+cargo sync-readme
+```
+(make sure the cargo command is installed):
+```bash
+cargo install cargo-sync-readme
+
