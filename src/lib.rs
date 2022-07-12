@@ -578,8 +578,7 @@ mod tests {
             assert_eq!(counter.load(Ordering::SeqCst), 1);
 
             // Second attempt
-            pause_ms(backoff).await;
-            pause().await;
+            pause_ms(backoff + 1000).await;
             assert_eq!(counter.load(Ordering::SeqCst), 2);
 
             // No more attempts
