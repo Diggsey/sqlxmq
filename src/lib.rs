@@ -371,6 +371,10 @@ mod tests {
         registry.runner(pool).run().await.unwrap()
     }
 
+    fn is_github_actions() -> bool {
+        std::env::var("GITHUB_ACTIONS").ok().is_some()
+    }
+
     async fn pause() {
         pause_ms(200).await;
     }
@@ -389,6 +393,9 @@ mod tests {
             assert_eq!(counter.load(Ordering::SeqCst), 0);
             JobBuilder::new("foo").spawn(pool).await.unwrap();
             pause().await;
+            if is_github_actions() {
+                pause_ms(1000).await;
+            }
             assert_eq!(counter.load(Ordering::SeqCst), 1);
         }
         pause().await;
@@ -578,11 +585,17 @@ mod tests {
             assert_eq!(counter.load(Ordering::SeqCst), 1);
 
             // Second attempt
-            pause_ms(backoff + 1000).await;
+            pause_ms(backoff).await;
+            if is_github_actions() {
+                pause_ms(1000).await;
+            }
             assert_eq!(counter.load(Ordering::SeqCst), 2);
 
             // No more attempts
             pause_ms(backoff * 3).await;
+            if is_github_actions() {
+                pause_ms(1000).await;
+            }
             assert_eq!(counter.load(Ordering::SeqCst), 2);
         }
         pause().await;
