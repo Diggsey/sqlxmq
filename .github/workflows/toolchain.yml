@@ -54,6 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RUST_BACKTRACE: "1"
+      GITHUB_ACTIONS: "1"
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
@@ -76,6 +77,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RUST_BACKTRACE: "1"
+      GITHUB_ACTIONS: "1"
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1

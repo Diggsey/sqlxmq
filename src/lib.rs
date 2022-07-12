@@ -371,8 +371,20 @@ mod tests {
         registry.runner(pool).run().await.unwrap()
     }
 
+    fn is_github_actions() -> bool {
+        std::env::var("GITHUB_ACTIONS").ok().is_some()
+    }
+
+    fn default_pause() -> u64 {
+        if is_github_actions() {
+            1000
+        } else {
+            200
+        }
+    }
+
     async fn pause() {
-        pause_ms(200).await;
+        pause_ms(default_pause()).await;
     }
 
     async fn pause_ms(ms: u64) {
@@ -513,7 +525,7 @@ mod tests {
             let pool = &*test_pool().await;
             let (_runner, counter) = test_job_runner(pool, move |_| async {}).await;
 
-            let backoff = 500;
+            let backoff = default_pause() + 300;
 
             assert_eq!(counter.load(Ordering::SeqCst), 0);
             JobBuilder::new("foo")
@@ -561,7 +573,7 @@ mod tests {
             })
             .await;
 
-            let backoff = 200;
+            let backoff = default_pause();
 
             assert_eq!(counter.load(Ordering::SeqCst), 0);
             JobBuilder::new("foo")
@@ -579,7 +591,6 @@ mod tests {
 
             // Second attempt
             pause_ms(backoff).await;
-            pause().await;
             assert_eq!(counter.load(Ordering::SeqCst), 2);
 
             // No more attempts
