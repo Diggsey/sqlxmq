@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::types::PgInterval;
@@ -30,6 +30,12 @@ struct JobRunner {
     options: JobRunnerOptions,
     running_jobs: AtomicUsize,
     notify: Notify,
+}
+
+/// Job runner handle
+pub struct JobRunnerHandle {
+    runner: Arc<JobRunner>,
+    handle: Option<OwnedHandle>,
 }
 
 /// Type used to checkpoint a running job.
@@ -253,7 +259,7 @@ impl JobRunnerOptions {
 
     /// Start the job runner in the background. The job runner will stop when the
     /// returned handle is dropped.
-    pub async fn run(&self) -> Result<OwnedHandle, sqlx::Error> {
+    pub async fn run(&self) -> Result<JobRunnerHandle, sqlx::Error> {
         let options = self.clone();
         let job_runner = Arc::new(JobRunner {
             options,
@@ -261,10 +267,11 @@ impl JobRunnerOptions {
             notify: Notify::new(),
         });
         let listener_task = start_listener(job_runner.clone()).await?;
-        Ok(OwnedHandle::new(task::spawn(main_loop(
-            job_runner,
-            listener_task,
-        ))))
+        let handle = OwnedHandle::new(task::spawn(main_loop(job_runner.clone(), listener_task)));
+        Ok(JobRunnerHandle {
+            runner: job_runner,
+            handle: Some(handle),
+        })
     }
 
     /// Run a single job and then return. Intended for use by tests. The job should
@@ -317,6 +324,29 @@ impl JobRunnerOptions {
             let _ = rx.await;
         }
         Ok(())
+    }
+}
+
+impl JobRunnerHandle {
+    /// Return the number of still running jobs
+    pub fn num_running_jobs(&self) -> usize {
+        self.runner.running_jobs.load(Ordering::Relaxed)
+    }
+
+    /// Wait for the jobs to finish, but not more than `timeout`
+    pub async fn wait_jobs_finish(&self, timeout: Duration) {
+        let start = Instant::now();
+        let step = Duration::from_millis(1);
+        while self.num_running_jobs() > 0 && start.elapsed() < timeout {
+            tokio::time::sleep(step).await;
+        }
+    }
+
+    /// Stop the inner task and wait for it to finish.
+    pub async fn stop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            handle.stop().await
+        }
     }
 }
 
