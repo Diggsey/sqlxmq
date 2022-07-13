@@ -371,12 +371,12 @@ mod tests {
         registry.runner(pool).run().await.unwrap()
     }
 
-    fn is_github_actions() -> bool {
-        std::env::var("GITHUB_ACTIONS").ok().is_some()
+    fn is_ci() -> bool {
+        std::env::var("CI").ok().is_some()
     }
 
     fn default_pause() -> u64 {
-        if is_github_actions() {
+        if is_ci() {
             1000
         } else {
             200
