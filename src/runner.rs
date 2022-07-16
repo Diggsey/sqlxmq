@@ -336,7 +336,7 @@ impl JobRunnerHandle {
     /// Wait for the jobs to finish, but not more than `timeout`
     pub async fn wait_jobs_finish(&self, timeout: Duration) {
         let start = Instant::now();
-        let step = Duration::from_millis(1);
+        let step = Duration::from_millis(10);
         while self.num_running_jobs() > 0 && start.elapsed() < timeout {
             tokio::time::sleep(step).await;
         }
