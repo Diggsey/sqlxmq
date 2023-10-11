@@ -1,4 +1,7 @@
 {
     "rust-analyzer.checkOnSave.allFeatures": false,
-    "rust-analyzer.cargo.allFeatures": false
+    "rust-analyzer.cargo.allFeatures": false,
+    "rust-analyzer.cargo.features": [
+        "runtime-tokio-native-tls"
+    ]
 }

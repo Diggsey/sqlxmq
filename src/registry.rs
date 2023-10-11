@@ -15,10 +15,13 @@ use crate::hidden::{BuildFn, RunFn};
 use crate::utils::Opaque;
 use crate::{JobBuilder, JobRunnerOptions};
 
+type BoxedError = Box<dyn Error + Send + 'static>;
+
 /// Stores a mapping from job name to job. Can be used to construct
 /// a job runner.
 pub struct JobRegistry {
-    error_handler: Arc<dyn Fn(&str, Box<dyn Error + Send + 'static>) + Send + Sync>,
+    #[allow(clippy::type_complexity)]
+    error_handler: Arc<dyn Fn(&str, BoxedError) + Send + Sync>,
     job_map: HashMap<&'static str, &'static NamedJob>,
     context: Map<dyn CloneAnySendSync + Send + Sync>,
 }
@@ -53,7 +56,7 @@ impl JobRegistry {
     /// Set a function to be called whenever a job returns an error.
     pub fn set_error_handler(
         &mut self,
-        error_handler: impl Fn(&str, Box<dyn Error + Send + 'static>) + Send + Sync + 'static,
+        error_handler: impl Fn(&str, BoxedError) + Send + Sync + 'static,
     ) -> &mut Self {
         self.error_handler = Arc::new(error_handler);
         self
@@ -83,7 +86,7 @@ impl JobRegistry {
     }
 
     /// The default error handler implementation, which simply logs the error.
-    pub fn default_error_handler(name: &str, error: Box<dyn Error + Send + 'static>) {
+    pub fn default_error_handler(name: &str, error: BoxedError) {
         log::error!("Job `{}` failed: {}", name, error);
     }
 
