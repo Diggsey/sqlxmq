@@ -142,7 +142,7 @@ impl CurrentJob {
         &mut self,
         mut tx: sqlx::Transaction<'_, Postgres>,
     ) -> Result<(), sqlx::Error> {
-        self.delete(&mut tx).await?;
+        self.delete(&mut *tx).await?;
         tx.commit().await?;
         self.stop_keep_alive().await;
         Ok(())
@@ -161,7 +161,7 @@ impl CurrentJob {
         mut tx: sqlx::Transaction<'_, Postgres>,
         checkpoint: &Checkpoint<'_>,
     ) -> Result<(), sqlx::Error> {
-        checkpoint.execute(self.id, &mut tx).await?;
+        checkpoint.execute(self.id, &mut *tx).await?;
         tx.commit().await?;
         Ok(())
     }

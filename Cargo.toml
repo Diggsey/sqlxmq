@@ -15,7 +15,7 @@ members = ["sqlxmq_macros", "sqlxmq_stress"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-sqlx = { version = "0.6.0", features = ["postgres", "chrono", "uuid"] }
+sqlx = { version = "0.7.1", features = ["postgres", "chrono", "uuid"] }
 tokio = { version = "1.8.3", features = ["full"] }
 dotenv = "0.15.0"
 chrono = "0.4.19"
