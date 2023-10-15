@@ -80,7 +80,7 @@ async fn schedule_tasks(num_jobs: usize, interval: Duration, pool: Pool<Postgres
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let _ = dotenv::dotenv();
+    let _ = dotenvy::dotenv();
 
     let pool = Pool::connect(&env::var("DATABASE_URL")?).await?;
 

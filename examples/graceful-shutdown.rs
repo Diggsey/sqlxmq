@@ -4,7 +4,7 @@ use tokio::time;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     let db = sqlx::PgPool::connect(&std::env::var("DATABASE_URL").unwrap()).await?;
 
     sleep.builder().set_json(&5u64)?.spawn(&db).await?;

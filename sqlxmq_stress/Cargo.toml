@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 sqlxmq = { path = ".." }
 tokio = { version = "1.4.0", features = ["full"] }
-dotenv = "0.15.0"
+dotenvy = "0.15.3"
 sqlx = "0.6.0"
 serde = "1.0.125"
 lazy_static = "1.4.0"
