@@ -9,23 +9,10 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: login
-          args: -- ${{secrets.CARGO_TOKEN}}
-      - uses: actions-rs/cargo@v1
-        with:
-          command: publish
-          args: --manifest-path sqlxmq_macros/Cargo.toml
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo login -- ${{secrets.CARGO_TOKEN}}
+      - run: cargo publish --manifest-path sqlxmq_macros/Cargo.toml
       - name: Wait for crates.io to update
         run: sleep 30
-      - uses: actions-rs/cargo@v1
-        with:
-          command: publish
-          args: --manifest-path Cargo.toml
+      - run: cargo publish --manifest-path Cargo.toml
