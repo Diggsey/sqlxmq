@@ -1,0 +1,3 @@
+db/
+db_sockets/
+!db_sockets/.gitkeep
