@@ -294,7 +294,7 @@ mod tests {
 
         let guard = TEST_MUTEX.lock().await;
 
-        let _ = dotenv::dotenv();
+        let _ = dotenvy::dotenv();
 
         INIT_LOGGER.call_once(pretty_env_logger::init);
 
