@@ -278,6 +278,8 @@ mod tests {
     use tokio::sync::{Mutex, MutexGuard};
     use tokio::task;
 
+    // field 0 is never read, but its drop is important
+    #[allow(dead_code)]
     struct TestGuard<T>(MutexGuard<'static, ()>, T);
 
     impl<T> Deref for TestGuard<T> {

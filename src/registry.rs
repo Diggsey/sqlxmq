@@ -87,7 +87,7 @@ impl JobRegistry {
 
     /// The default error handler implementation, which simply logs the error.
     pub fn default_error_handler(name: &str, error: BoxedError) {
-        log::error!("Job `{}` failed: {}", name, error);
+        log::error!("Job `{}` failed: {:?}", name, error);
     }
 
     #[doc(hidden)]
