@@ -1,7 +1,0 @@
-export db_socket_path=$(echo $(pwd)/devsupport/db_sockets)
-export PGDATA="$(pwd)/devsupport/db"
-export DATABASE_URL="postgres:///sqlxmq?host=$db_socket_path&sslmode=disable"
-# export SQLX_OFFLINE=yes
-
-session_name sqlxmq
-use lorri
