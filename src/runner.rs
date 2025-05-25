@@ -427,7 +427,7 @@ async fn poll_and_dispatch(
 
     let wait_time = messages
         .iter()
-        .filter_map(|msg| msg.wait_time.clone())
+        .filter_map(|msg| msg.wait_time)
         .map(to_duration)
         .min()
         .unwrap_or(MAX_WAIT);
