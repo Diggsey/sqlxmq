@@ -559,6 +559,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn it_uses_max_retry_backoff_correctly() {
+        {
+            let pool = &*test_pool().await;
+
+            let backoff = default_pause() + 300;
+
+            let counter = Arc::new(AtomicUsize::new(0));
+            let counter2 = counter.clone();
+            let _runner = JobRunnerOptions::new(pool, move |_job| {
+                counter2.fetch_add(1, Ordering::SeqCst);
+            })
+            .set_max_retry_backoff(Duration::from_millis(backoff * 4))
+            .run()
+            .await
+            .unwrap();
+
+            assert_eq!(counter.load(Ordering::SeqCst), 0);
+            JobBuilder::new("foo")
+                .set_retry_backoff(Duration::from_millis(backoff))
+                .set_retries(4)
+                .spawn(pool)
+                .await
+                .unwrap();
+
+            // First attempt
+            pause().await;
+            assert_eq!(counter.load(Ordering::SeqCst), 1);
+
+            // Second attempt
+            pause_ms(backoff).await;
+            pause().await;
+            assert_eq!(counter.load(Ordering::SeqCst), 2);
+
+            // Third attempt
+            pause_ms(backoff * 2).await;
+            pause().await;
+            assert_eq!(counter.load(Ordering::SeqCst), 3);
+
+            // Fourth attempt
+            pause_ms(backoff * 4).await;
+            pause().await;
+            assert_eq!(counter.load(Ordering::SeqCst), 4);
+
+            // Fifth attempt with now constant pause
+            pause_ms(backoff * 4).await;
+            pause().await;
+            assert_eq!(counter.load(Ordering::SeqCst), 5);
+        }
+        pause().await;
+    }
+
+    #[tokio::test]
     async fn it_can_checkpoint_jobs() {
         {
             let pool = &*test_pool().await;
